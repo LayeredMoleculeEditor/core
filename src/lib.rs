@@ -4,7 +4,7 @@ pub fn add(left: usize, right: usize) -> usize {
 
 pub mod layer {
     use rayon::prelude::*;
-    use std::collections::{HashMap, HashSet};
+    use std::{collections::{HashMap, HashSet}, hash::Hash};
 
     use nalgebra::{Point3, Vector3};
 
@@ -89,6 +89,17 @@ pub mod layer {
         }
     }
 
+    impl<T: Hash + Ord> Hash for Pair<T> {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            let Self(a, b) = self;
+            let mut values = [a, b];
+            values.sort();
+            for value in values {
+                value.hash(state)
+            }
+        }
+    }
+
     pub trait ReadableAtomLayer {
         fn get_idxs(&self) -> HashSet<usize>;
         fn get_ids(&self) -> HashSet<String>;
@@ -98,7 +109,7 @@ pub mod layer {
         fn get_atom(&self, idx: usize) -> Option<&Atom>;
     }
 
-    pub trait WritableAtomLayer: ReadableAtomLayer {
+    pub trait WritableAtomLayer {
         fn set_atom(&mut self, idx: usize, atom: Atom) -> Option<Atom>;
     }
 
@@ -203,7 +214,43 @@ pub mod layer {
 
     impl WritableAtomLayerHelper for AtomFillLayer {}
 
+    pub trait ReadableBondLayer<BondT> {
+        fn get_idxs(&self) -> HashSet<Pair<usize>>;
+        fn get_value(&self, idx: &Pair<usize>) -> Option<&BondT>;
+    }
+
+    pub trait WritableBondLayer<BondT> {
+        fn set_bond(&mut self, idx: Pair<usize>, bond: BondT) -> Option<BondT>;
+
+    }
+
     pub struct BondFillLayer<BondT = f64>(HashMap<Pair<usize>, BondT>);
+
+    impl<BondT> BondFillLayer<BondT> {
+        fn data(&self) -> &HashMap<Pair<usize>, BondT> {
+            &self.0
+        }
+
+        fn data_mut(&mut self) -> &mut HashMap<Pair<usize>, BondT> {
+            &mut self.0
+        }
+    }
+
+    impl<BondT> ReadableBondLayer<BondT> for BondFillLayer<BondT> {
+        fn get_idxs(&self) -> HashSet<Pair<usize>> {
+            self.data().keys().copied().collect::<HashSet<_>>()
+        }
+
+        fn get_value(&self, idx: &Pair<usize>) -> Option<&BondT> {
+            self.data().get(idx)
+        }
+    }
+
+    impl<BondT> WritableBondLayer<BondT> for BondFillLayer<BondT> {
+        fn set_bond(&mut self, idx: Pair<usize>, bond: BondT) -> Option<BondT> {
+            self.data_mut().insert(idx, bond)
+        }
+    }
 }
 
 #[cfg(test)]
