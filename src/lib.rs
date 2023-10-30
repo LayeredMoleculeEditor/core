@@ -1,4 +1,4 @@
-pub mod core;
+pub mod atom_layer;
 
 pub mod utils {
     use std::{
