@@ -12,91 +12,105 @@ pub struct AtomData {
     pub position: Point3<f64>,
 }
 
-pub struct AtomLayer {
-    atoms: HashMap<usize, AtomData>,
-    id_map: UniqueValueMap<usize, String>,
-    class_map: ManyToMany<usize, String>,
+pub trait ReadableAtomLayer {
+    fn atoms(&self) -> &HashMap<usize, AtomData>;
 }
 
-pub trait SelectEntry {
-    fn close(self) -> AtomLayer;
+pub trait WritableAtomLayer {
+    fn atoms_mut(&mut self) -> &mut HashMap<usize, AtomData>;
+}
+
+pub trait IdLayer {
+    fn id_map(&self) -> &UniqueValueMap<usize, String>;
+    fn id_map_mut(&self) -> &mut UniqueValueMap<usize, String>;
+}
+
+pub trait ClassLayer {
+    fn class_map(&self) -> &ManyToMany<usize, String>;
+    fn class_map_mut(&mut self) -> &mut ManyToMany<usize, String>;
+}
+
+pub trait AtomEntryBase: ReadableAtomLayer + WritableAtomLayer + IdLayer + ClassLayer {}
+
+pub trait AtomEntry<T> {
+    fn close(self) -> T;
 }
 
 static SELECTED_NOT_FOUND: &str = "selected atoms should always existed";
 
-pub struct SelectOne {
+pub struct SelectOne<T: AtomEntryBase> {
     idx: usize,
-    layer: AtomLayer,
+    layer: T
 }
 
-impl SelectEntry for SelectOne {
-    fn close(self) -> AtomLayer {
+impl<T: AtomEntryBase> AtomEntry<T> for SelectOne<T> {
+    fn close(self) -> T {
         self.layer
     }
 }
 
-impl SelectOne {
+impl<T: AtomEntryBase> SelectOne<T> {
     pub fn get_data(&self) -> AtomData {
-        *self.layer.atoms.get(&self.idx).expect(SELECTED_NOT_FOUND)
+        *self.layer.atoms().get(&self.idx).expect(SELECTED_NOT_FOUND)
     }
 
     pub fn set_data(&mut self, data: AtomData) -> AtomData {
         self.layer
-            .atoms
+            .atoms_mut()
             .insert(self.idx, data)
             .expect(SELECTED_NOT_FOUND)
     }
 
     pub fn get_id(&self) -> Option<&String> {
-        self.layer.id_map.data().get(&self.idx)
+        self.layer.id_map().data().get(&self.idx)
     }
 
     pub fn set_id(&mut self, id: String) -> InsertResult<usize, String> {
-        self.layer.id_map.insert(self.idx, id)
+        self.layer.id_map_mut().insert(self.idx, id)
     }
 
     pub fn remove_id(&mut self) -> Option<String> {
-        self.layer.id_map.remove(&self.idx)
+        self.layer.id_map_mut().remove(&self.idx)
     }
 
     pub fn get_classes(&self) -> Vec<String> {
-        self.layer.class_map.get_left(&self.idx).unwrap_or(vec![])
+        self.layer.class_map().get_left(&self.idx).unwrap_or(vec![])
     }
 
     pub fn set_class(&mut self, class: String) -> bool {
-        self.layer.class_map.insert(self.idx, class)
+        self.layer.class_map_mut().insert(self.idx, class)
     }
 
     pub fn remove_from_class(&mut self, class: &String) -> bool {
-        self.layer.class_map.remove(&self.idx, class)
+        self.layer.class_map_mut().remove(&self.idx, class)
     }
 
-    pub fn remove_atom(mut self) -> AtomLayer {
+    pub fn remove_atom(mut self) -> T {
         self.layer
-            .atoms
+            .atoms_mut()
             .remove(&self.idx)
             .expect(SELECTED_NOT_FOUND);
-        self.layer.id_map.remove(&self.idx);
-        self.layer.class_map.remove_left(&self.idx);
+        self.layer.id_map_mut().remove(&self.idx);
+        self.layer.class_map_mut().remove_left(&self.idx);
         self.close()
     }
 }
 
-pub struct SelectGroup {
+pub struct SelectGroup<T: AtomEntryBase + Sync> {
     class: String,
-    layer: AtomLayer,
+    layer: T,
 }
 
-impl SelectEntry for SelectGroup {
-    fn close(self) -> AtomLayer {
+impl<T: AtomEntryBase + Sync> AtomEntry<T> for SelectGroup<T> {
+    fn close(self) -> T {
         self.layer
     }
 }
 
-impl SelectGroup {
+impl<T: AtomEntryBase + Sync> SelectGroup<T> {
     pub fn get_idxs(&self) -> Vec<usize> {
         self.layer
-            .class_map
+            .class_map()
             .get_right(&self.class)
             .unwrap_or(vec![])
     }
@@ -104,28 +118,28 @@ impl SelectGroup {
     pub fn get_data(&self) -> HashMap<usize, AtomData> {
         self.get_idxs()
             .par_iter()
-            .map(|idx| (*idx, *self.layer.atoms.get(idx).expect(SELECTED_NOT_FOUND)))
+            .map(|idx| (*idx, *self.layer.atoms().get(idx).expect(SELECTED_NOT_FOUND)))
             .collect::<HashMap<_, _>>()
     }
 
     pub fn get_ids(&self) -> HashMap<usize, Option<String>> {
         self.get_idxs()
             .par_iter()
-            .map(|idx| (*idx, self.layer.id_map.data().get(idx).cloned()))
+            .map(|idx| (*idx, self.layer.id_map().data().get(idx).cloned()))
             .collect::<HashMap<_, _>>()
     }
 
     pub fn set_element(&mut self, element: isize) {
         for idx in self.get_idxs() {
             self.layer
-                .atoms
+                .atoms_mut()
                 .entry(idx)
                 .and_modify(|data| data.element = element);
         }
     }
 
     /// Move atom in single thread mode.
-    /// 
+    ///
     /// Similar to `move_atom` but calculate in single thread. You can use a mutable function which does't impl Clone + Sync
     pub fn move_atoms_single_thread<F>(&mut self, mut f: F)
     where
@@ -138,16 +152,16 @@ impl SelectGroup {
             .collect::<Vec<_>>();
         for (idx, position) in updated_positions {
             self.layer
-                .atoms
+                .atoms_mut()
                 .entry(idx)
                 .and_modify(|data| data.position = position);
         }
     }
 
     /// Move atom with given function
-    /// 
+    ///
     /// The given function receives origin position as parameter and returns new position
-    /// 
+    ///
     /// `move_atoms` caculate new position in multi-thread mode, so the function/closure should impl Copy + Sync and immutable
     pub fn move_atoms<F>(&mut self, f: F)
     where
@@ -160,7 +174,7 @@ impl SelectGroup {
             .collect::<Vec<_>>();
         for (idx, position) in updated_positions {
             self.layer
-                .atoms
+                .atoms_mut()
                 .entry(idx)
                 .and_modify(|data| data.position = position);
         }
@@ -185,18 +199,18 @@ impl SelectGroup {
         })
     }
 
-    pub fn remove_atoms(mut self) -> AtomLayer {
+    pub fn remove_atoms(mut self) -> T {
         let idxs = self.get_idxs();
-        self.layer.atoms.retain(|k, _| idxs.contains(k));
+        self.layer.atoms_mut().retain(|k, _| idxs.contains(k));
         for idx in idxs {
-            self.layer.id_map.remove(&idx);
-            self.layer.class_map.remove_left(&idx);
+            self.layer.id_map_mut().remove(&idx);
+            self.layer.class_map_mut().remove_left(&idx);
         }
         self.close()
     }
 
-    pub fn remove_class(mut self) -> AtomLayer {
-        self.layer.class_map.remove_right(&self.class);
+    pub fn remove_class(mut self) -> T {
+        self.layer.class_map_mut().remove_right(&self.class);
         self.close()
     }
 }
