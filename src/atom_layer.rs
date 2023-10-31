@@ -18,12 +18,22 @@ pub struct AtomLayer {
     class_map: ManyToMany<usize, String>,
 }
 
+pub trait SelectEntry {
+    fn close(self) -> AtomLayer;
+}
+
+static SELECTED_NOT_FOUND: &str = "selected atoms should always existed";
+
 pub struct SelectOne {
     idx: usize,
     layer: AtomLayer,
 }
 
-static SELECTED_NOT_FOUND: &str = "selected atoms should always existed";
+impl SelectEntry for SelectOne {
+    fn close(self) -> AtomLayer {
+        self.layer
+    }
+}
 
 impl SelectOne {
     pub fn get_data(&self) -> AtomData {
@@ -68,16 +78,22 @@ impl SelectOne {
             .expect(SELECTED_NOT_FOUND);
         self.layer.id_map.remove(&self.idx);
         self.layer.class_map.remove_left(&self.idx);
-        self.layer
+        self.close()
     }
 }
 
-pub struct SelectMany {
+pub struct SelectGroup {
     class: String,
     layer: AtomLayer,
 }
 
-impl SelectMany {
+impl SelectEntry for SelectGroup {
+    fn close(self) -> AtomLayer {
+        self.layer
+    }
+}
+
+impl SelectGroup {
     pub fn get_idxs(&self) -> Vec<usize> {
         self.layer
             .class_map
