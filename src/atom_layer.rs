@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use many_to_many::ManyToMany;
-use nalgebra::{Point3, Vector3};
+use nalgebra::{Point3, Rotation3, Unit, Vector3};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
-use crate::utils::{UniqueValueMap, InsertResult};
+use crate::utils::{InsertResult, UniqueValueMap};
 
 #[derive(Debug, Clone, Copy)]
 pub struct AtomData {
@@ -100,6 +100,7 @@ impl SelectGroup {
             .get_right(&self.class)
             .unwrap_or(vec![])
     }
+
     pub fn get_data(&self) -> HashMap<usize, AtomData> {
         self.get_idxs()
             .par_iter()
@@ -123,6 +124,31 @@ impl SelectGroup {
         }
     }
 
+    /// Move atom in single thread mode.
+    /// 
+    /// Similar to `move_atom` but calculate in single thread. You can use a mutable function which does't impl Clone + Sync
+    pub fn move_atoms_single_thread<F>(&mut self, mut f: F)
+    where
+        F: FnMut(Point3<f64>) -> Point3<f64>,
+    {
+        let updated_positions = self
+            .get_data()
+            .into_iter()
+            .map(|(idx, data)| (idx, f(data.position)))
+            .collect::<Vec<_>>();
+        for (idx, position) in updated_positions {
+            self.layer
+                .atoms
+                .entry(idx)
+                .and_modify(|data| data.position = position);
+        }
+    }
+
+    /// Move atom with given function
+    /// 
+    /// The given function receives origin position as parameter and returns new position
+    /// 
+    /// `move_atoms` caculate new position in multi-thread mode, so the function/closure should impl Copy + Sync and immutable
     pub fn move_atoms<F>(&mut self, f: F)
     where
         F: Copy + Sync + FnOnce(Point3<f64>) -> Point3<f64>,
@@ -142,5 +168,35 @@ impl SelectGroup {
 
     pub fn translate_atoms(&mut self, delta: Vector3<f64>) {
         self.move_atoms(|origin| origin + delta)
+    }
+
+    /// Rotate atoms
+    ///
+    /// Rotate atoms around given axis with specified angle.
+    ///
+    /// If target axis doesn't pass the origin, you should translate atoms before rotate and then translate them back.
+    pub fn rotate_atoms(&mut self, axis: Vector3<f64>, angle: f64) {
+        let unit_axis = Unit::new_normalize(axis);
+        let rotation = Rotation3::from_axis_angle(&unit_axis, angle);
+        self.move_atoms(|origin| {
+            let vector = Vector3::<f64>::from(origin - Point3::new(0., 0., 0.)).transpose();
+            let rotated = vector * rotation;
+            Point3::from(rotated.transpose())
+        })
+    }
+
+    pub fn remove_atoms(mut self) -> AtomLayer {
+        let idxs = self.get_idxs();
+        self.layer.atoms.retain(|k, _| idxs.contains(k));
+        for idx in idxs {
+            self.layer.id_map.remove(&idx);
+            self.layer.class_map.remove_left(&idx);
+        }
+        self.close()
+    }
+
+    pub fn remove_class(mut self) -> AtomLayer {
+        self.layer.class_map.remove_right(&self.class);
+        self.close()
     }
 }
