@@ -4,12 +4,38 @@ use many_to_many::ManyToMany;
 use nalgebra::{Point3, Rotation3, Unit, Vector3};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
-use crate::utils::{InsertResult, UniqueValueMap};
+use crate::utils::{InsertResult, Pair, UniqueValueMap};
 
 #[derive(Debug, Clone, Copy)]
 pub struct AtomData {
     pub element: isize,
     pub position: Point3<f64>,
+}
+
+pub trait ReadableBondLayer<BondType> {
+    fn bonds(&self) -> &HashMap<Pair<usize>, BondType>;
+    fn get_with_idx(&self, idx: usize) -> HashMap<usize, &BondType> {
+        self.bonds()
+            .iter()
+            .filter_map(|(bond_idx, bond_type)| {
+                if let Some(another) = bond_idx.get_another(&idx) {
+                    Some((*another, bond_type))
+                } else {
+                    None
+                }
+            })
+            .collect::<HashMap<_, _>>()
+    }
+}
+
+pub trait WritableBondLayer<BondType> {
+    fn bonds_mut(&mut self) -> &mut HashMap<Pair<usize>, BondType>;
+    fn set_bond(&mut self, a: usize, b: usize, bond: BondType) -> Option<BondType> {
+        self.bonds_mut().insert(Pair::new(a, b), bond)
+    }
+    fn remove_bond(&mut self, a: usize, b: usize) -> Option<BondType> {
+        self.bonds_mut().remove(&Pair::new(a, b))
+    }
 }
 
 pub trait ReadableAtomLayer {
@@ -32,7 +58,7 @@ pub trait ClassLayer {
 
 pub trait AtomEntryBase: ReadableAtomLayer + WritableAtomLayer + IdLayer + ClassLayer {}
 
-pub trait AtomEntry<T> {
+pub trait EntryWrapper<T> {
     fn close(self) -> T;
 }
 
@@ -40,10 +66,10 @@ static SELECTED_NOT_FOUND: &str = "selected atoms should always existed";
 
 pub struct SelectOne<T: AtomEntryBase> {
     idx: usize,
-    layer: T
+    layer: T,
 }
 
-impl<T: AtomEntryBase> AtomEntry<T> for SelectOne<T> {
+impl<T: AtomEntryBase> EntryWrapper<T> for SelectOne<T> {
     fn close(self) -> T {
         self.layer
     }
@@ -101,7 +127,7 @@ pub struct SelectGroup<T: AtomEntryBase + Sync> {
     layer: T,
 }
 
-impl<T: AtomEntryBase + Sync> AtomEntry<T> for SelectGroup<T> {
+impl<T: AtomEntryBase + Sync> EntryWrapper<T> for SelectGroup<T> {
     fn close(self) -> T {
         self.layer
     }
@@ -118,7 +144,12 @@ impl<T: AtomEntryBase + Sync> SelectGroup<T> {
     pub fn get_data(&self) -> HashMap<usize, AtomData> {
         self.get_idxs()
             .par_iter()
-            .map(|idx| (*idx, *self.layer.atoms().get(idx).expect(SELECTED_NOT_FOUND)))
+            .map(|idx| {
+                (
+                    *idx,
+                    *self.layer.atoms().get(idx).expect(SELECTED_NOT_FOUND),
+                )
+            })
             .collect::<HashMap<_, _>>()
     }
 
