@@ -103,6 +103,19 @@ pub mod utils {
         }
     }
 
+    #[derive(Debug)]
+    pub enum LayerRemoveResult<T> {
+        Removed(T),
+        Shadowed,
+        None,
+    }
+
+    pub enum LayerInserResult<'a, T> {
+        Created,
+        Updated(T),
+        Overlayed(&'a T),
+    }
+
     #[test]
     fn uniq_val_map() {
         let mut map: UniqueValueMap<String, usize> = UniqueValueMap::new();
