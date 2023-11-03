@@ -37,6 +37,36 @@ pub trait WritableBondContainer<BondType> {
     fn remove_bond(&mut self, a: &usize, b: &usize) -> LayerRemoveResult<BondType>;
 }
 
+pub struct EmptyBase {
+    ids: HashMap<usize, String>,
+    classes: ManyToMany<usize, String>,
+}
+
+impl ReadableAtomContainer for EmptyBase {
+    fn get_idxs(&self) -> Vec<usize> {
+        vec![]
+    }
+    fn get_atom(&self, _idx: &usize) -> Option<&Atom> {
+        None
+    }
+    fn get_ids(&self) -> &HashMap<usize, String> {
+        &self.ids
+    }
+    fn get_classes(&self) -> &ManyToMany<usize, String> {
+        &self.classes
+    }
+}
+
+impl<BondType> ReadableBondContainer<BondType> for EmptyBase {
+    fn get_idxs(&self) -> Vec<Pair<usize>> {
+        vec![]
+    }
+
+    fn get_bond(&self, _a: &usize, _b: &usize) -> Option<&BondType> {
+        None
+    }
+}
+
 pub struct AtomLayer {
     atoms: HashMap<usize, Atom>,
     ids: UniqueValueMap<usize, String>,
