@@ -70,6 +70,9 @@ pub mod utils {
     pub struct Pair<T>(T, T);
 
     impl<T: Eq> Pair<T> {
+        pub fn to_tuple(&self) -> (&T, &T) {
+            (&self.0, &self.1)
+        }
         pub fn get_another(&self, current: &T) -> Option<&T> {
             let Self(a, b) = self;
             if current == a {

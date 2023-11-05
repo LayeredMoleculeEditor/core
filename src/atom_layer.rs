@@ -1,20 +1,22 @@
-use std::{collections::HashMap, hash::Hash, usize};
+use rayon::prelude::*;
+use std::{collections::HashMap, hash::Hash, sync::Arc};
 
 use nalgebra::Point3;
 
 use crate::utils::Pair;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Atom {
     element: usize,
     position: Point3<f64>,
 }
 
-pub trait ReadableFillLayer<K: Copy + Eq + Hash, V> {
+pub trait FillLayer<K: Copy + Eq + Hash, V: Copy> {
     fn get_idxs(&self) -> Vec<K>;
     fn get_value(&self, idx: &K) -> Option<&V>;
 }
 
-pub trait ReadableBondFillLayer<BondType>: ReadableFillLayer<Pair<usize>, BondType> {
+pub trait BondFillLayer<BondType: Copy>: FillLayer<Pair<usize>, BondType> {
     fn get_neighbors(&self, idx: &usize) -> Vec<(Pair<usize>, &BondType)> {
         self.get_idxs()
             .into_iter()
@@ -27,13 +29,13 @@ pub trait ReadableBondFillLayer<BondType>: ReadableFillLayer<Pair<usize>, BondTy
     }
 }
 
-pub trait WritableFillLayer<K: Copy + Eq + Hash, V>: ReadableFillLayer<K, V> {
+pub trait WritableFillLayer<K: Copy + Eq + Hash, V: Copy>: FillLayer<K, V> {
     fn set_value(&mut self, idx: K, value: V) -> Option<V>;
     fn shadow_value(&mut self, idx: K);
 }
 
-pub trait WritableBondFillLayer<BondType>:
-    WritableFillLayer<Pair<usize>, BondType> + ReadableBondFillLayer<BondType>
+pub trait WritableBondFillLayer<BondType: Copy>:
+    WritableFillLayer<Pair<usize>, BondType> + BondFillLayer<BondType>
 {
     fn remove_node(&mut self, idx: &usize) {
         let neighbors = self
@@ -47,17 +49,14 @@ pub trait WritableBondFillLayer<BondType>:
     }
 }
 
-pub trait ABFillLayer<BondType>:
-    ReadableFillLayer<usize, Atom> + ReadableBondFillLayer<BondType>
-{
-}
+pub trait ABFillLayer<BondType: Copy>: FillLayer<usize, Atom> + BondFillLayer<BondType> {}
 
 pub struct RwFillLayer<BondType> {
     atoms: HashMap<usize, Option<Atom>>,
     bonds: HashMap<Pair<usize>, Option<BondType>>,
 }
 
-impl<BondType> ReadableFillLayer<usize, Atom> for RwFillLayer<BondType> {
+impl<BondType> FillLayer<usize, Atom> for RwFillLayer<BondType> {
     fn get_idxs(&self) -> Vec<usize> {
         self.atoms.keys().copied().collect::<Vec<_>>()
     }
@@ -67,7 +66,7 @@ impl<BondType> ReadableFillLayer<usize, Atom> for RwFillLayer<BondType> {
     }
 }
 
-impl<BondType> ReadableFillLayer<Pair<usize>, BondType> for RwFillLayer<BondType> {
+impl<BondType: Copy> FillLayer<Pair<usize>, BondType> for RwFillLayer<BondType> {
     fn get_idxs(&self) -> Vec<Pair<usize>> {
         self.bonds.keys().copied().collect::<Vec<_>>()
     }
@@ -77,9 +76,9 @@ impl<BondType> ReadableFillLayer<Pair<usize>, BondType> for RwFillLayer<BondType
     }
 }
 
-impl<BondType> ReadableBondFillLayer<BondType> for RwFillLayer<BondType> {}
+impl<BondType: Copy> BondFillLayer<BondType> for RwFillLayer<BondType> {}
 
-impl<BondType> WritableFillLayer<usize, Atom> for RwFillLayer<BondType> {
+impl<BondType: Copy> WritableFillLayer<usize, Atom> for RwFillLayer<BondType> {
     fn set_value(&mut self, idx: usize, value: Atom) -> Option<Atom> {
         self.atoms.insert(idx, Some(value)).unwrap_or(None)
     }
@@ -88,7 +87,7 @@ impl<BondType> WritableFillLayer<usize, Atom> for RwFillLayer<BondType> {
     }
 }
 
-impl<BondType> WritableFillLayer<Pair<usize>, BondType> for RwFillLayer<BondType> {
+impl<BondType: Copy> WritableFillLayer<Pair<usize>, BondType> for RwFillLayer<BondType> {
     fn set_value(&mut self, idx: Pair<usize>, value: BondType) -> Option<BondType> {
         self.bonds.insert(idx, Some(value)).unwrap_or(None)
     }
@@ -98,4 +97,84 @@ impl<BondType> WritableFillLayer<Pair<usize>, BondType> for RwFillLayer<BondType
     }
 }
 
-impl<BondType> WritableBondFillLayer<BondType> for RwFillLayer<BondType> {}
+impl<BondType: Copy> WritableBondFillLayer<BondType> for RwFillLayer<BondType> {}
+
+impl<BondType: Copy> ABFillLayer<BondType> for RwFillLayer<BondType> {}
+
+pub trait Exportable<BondType, OutputBondType> {
+    fn export(
+        &self,
+        f: fn(BondType) -> Option<OutputBondType>,
+    ) -> (
+        Vec<Atom>,
+        HashMap<(usize, usize), OutputBondType>,
+        Vec<usize>,
+    );
+}
+
+impl<BondType: Copy + Sync + Send, OutputBondType: Copy + Sync + Send>
+    Exportable<BondType, OutputBondType> for RwFillLayer<BondType>
+{
+    fn export(
+        &self,
+        f: fn(BondType) -> Option<OutputBondType>,
+    ) -> (
+        Vec<Atom>,
+        HashMap<(usize, usize), OutputBondType>,
+        Vec<usize>,
+    ) {
+        let mut cleaned = self
+            .atoms
+            .par_iter()
+            .filter_map(|(idx, atom)| atom.and_then(|atom| Some((*idx, atom))))
+            .collect::<Vec<_>>();
+        cleaned.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let (idxs, atoms): (Vec<usize>, Vec<Atom>) = cleaned.into_par_iter().unzip();
+        let bonds = self
+            .bonds
+            .par_iter()
+            .filter_map(|(pair, bond)| {
+                let (a, b) = pair.to_tuple();
+                idxs.iter()
+                    .position(|idx| idx == a)
+                    .zip(idxs.iter().position(|idx| idx == b))
+                    .zip(bond.and_then(f))
+            })
+            .collect::<HashMap<_, _>>();
+        (atoms, bonds, idxs)
+    }
+}
+
+pub enum MultiLayerContainer<BondType> {
+    Fill(Arc<dyn ABFillLayer<BondType>>),
+    Filter(Arc<fn(RwFillLayer<BondType>) -> RwFillLayer<BondType>>),
+}
+
+impl<BondType: Copy> MultiLayerContainer<BondType> {
+    pub fn compose(layers: &Vec<Self>) -> RwFillLayer<BondType> {
+        let mut output = RwFillLayer {
+            atoms: HashMap::new(),
+            bonds: HashMap::new(),
+        };
+        for layer in layers {
+            match layer {
+                Self::Fill(fill_layer) => {
+                    let atoms = fill_layer
+                        .get_idxs()
+                        .into_iter()
+                        .map(|idx| (idx, fill_layer.get_value(&idx).copied()));
+                    output.atoms.extend(atoms);
+                    let bonds = fill_layer
+                        .get_idxs()
+                        .into_iter()
+                        .map(|pair| (pair, fill_layer.get_value(&pair).copied()));
+                    output.bonds.extend(bonds);
+                }
+                Self::Filter(transformer_fn) => {
+                    output = transformer_fn(output);
+                }
+            }
+        }
+        output
+    }
+}
