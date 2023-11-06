@@ -1,5 +1,9 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
+use lazy_static::lazy_static;
 use nalgebra::{Matrix3, Rotation3, Unit, Vector3};
 use rayon::prelude::*;
 use uuid::Uuid;
@@ -20,13 +24,50 @@ pub trait Layer {
     fn uuid(&self) -> &Uuid;
 }
 
-fn merge_base(base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
-    if let Some((last, base)) = base.split_last() {
-        last.read(base)
-    } else {
-        (HashMap::new(), HashMap::new())
+pub struct LayerMerger {
+    cache: Arc<RwLock<HashMap<Vec<String>, (AtomTable, BondTable)>>>,
+}
+
+impl LayerMerger {
+    fn new() -> Self {
+        Self {
+            cache: Arc::new(RwLock::new(HashMap::from([(
+                vec![],
+                (HashMap::new(), HashMap::new()),
+            )]))),
+        }
+    }
+    fn merge_base(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
+        let path = base
+            .iter()
+            .map(|layer| layer.uuid().to_string())
+            .collect::<Vec<_>>();
+        if let Some(cached) = self
+            .cache
+            .read()
+            .expect("Failed to load cache from RwLock")
+            .get(&path)
+        {
+            cached.clone()
+        } else {
+            if let Some((last, base)) = base.split_last() {
+                let result = last.read(base);
+                self.cache
+                    .write()
+                    .expect("Failed to write to cache in RwLock")
+                    .insert(path, result.clone());
+                result
+            } else {
+                (HashMap::new(), HashMap::new())
+            }
+        }
     }
 }
+
+lazy_static! {
+    static ref LAYER_MERGER: LayerMerger = LayerMerger::new();
+}
+
 pub struct FillLayer {
     atoms: HashMap<usize, Option<Atom>>,
     bonds: HashMap<Pair<usize>, Option<f64>>,
@@ -35,7 +76,7 @@ pub struct FillLayer {
 
 impl Layer for FillLayer {
     fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
-        let (mut atoms, mut bonds) = merge_base(base);
+        let (mut atoms, mut bonds) = LAYER_MERGER.merge_base(base);
         atoms.extend(&self.atoms);
         bonds.extend(&self.bonds);
         (atoms, bonds)
@@ -89,7 +130,7 @@ impl RotationLayer {
 
 impl Layer for RotationLayer {
     fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
-        let (mut atom_table, bond_table) = merge_base(base);
+        let (mut atom_table, bond_table) = LAYER_MERGER.merge_base(base);
         let (idxs, atoms): (Vec<usize>, Vec<Atom>) = atom_table
             .par_iter()
             .filter_map(|(idx, atom)| atom.and_then(|atom| Some((idx, atom))))
@@ -128,7 +169,7 @@ impl TranslateLayer {
 
 impl Layer for TranslateLayer {
     fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
-        let (mut atom_table, bond_table) = merge_base(base);
+        let (mut atom_table, bond_table) = LAYER_MERGER.merge_base(base);
         let (idxs, atoms): (Vec<usize>, Vec<Atom>) = atom_table
             .par_iter()
             .filter_map(|(idx, atom)| atom.and_then(|atom| Some((idx, atom))))
