@@ -6,14 +6,27 @@ use std::{
 use lazy_static::lazy_static;
 use nalgebra::{Matrix3, Rotation3, Unit, Vector3};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::utils::Pair;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Atom {
     element: usize,
-    position: Vector3<f64>,
+    coordinate: [f64; 3],
+}
+
+impl Atom {
+    fn new(element: usize, x: f64, y: f64, z: f64) -> Self {
+        Self {
+            element,
+            coordinate: [x, y, z],
+        }
+    }
+    fn position(&self) -> Vector3<f64> {
+        Vector3::from(self.coordinate)
+    }
 }
 
 pub type AtomTable = HashMap<usize, Option<Atom>>;
@@ -137,11 +150,13 @@ impl Layer for RotationLayer {
             .unzip();
         let rotated = atoms
             .into_par_iter()
-            .map(|Atom { element, position }| {
+            .map(|atom| {
+                let position = atom.position();
+                let element = atom.element;
                 let vector = Vector3::from(position - self.center).transpose();
                 let rotated = vector * self.matrix;
                 let position = rotated.transpose() + self.center;
-                Some(Atom { element, position })
+                Some(Atom::new(element, position.x, position.y, position.z))
             })
             .collect::<Vec<_>>();
         atom_table.extend(idxs.into_iter().zip(rotated));
@@ -176,11 +191,9 @@ impl Layer for TranslateLayer {
             .unzip();
         let translated = atoms
             .into_par_iter()
-            .map(|Atom { element, position }| {
-                Some(Atom {
-                    element,
-                    position: position + self.vector,
-                })
+            .map(|atom| {
+                let position = atom.position() + self.vector;
+                Some(Atom::new(atom.element, position.x, position.y, position.z))
             })
             .collect::<Vec<_>>();
         atom_table.extend(idxs.into_iter().zip(translated));
@@ -189,5 +202,65 @@ impl Layer for TranslateLayer {
 
     fn uuid(&self) -> &Uuid {
         &self.layer_id
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ExchangeData {
+    atoms: Vec<Atom>,
+    bonds: HashMap<(usize, usize), f64>,
+    maps: Vec<usize>,
+    origin_bonds: Vec<Pair<usize>>,
+    origin_len: usize,
+}
+
+impl From<(AtomTable, BondTable)> for ExchangeData {
+    fn from((atom_table, bond_table): (AtomTable, BondTable)) -> Self {
+        let origin_len = atom_table.len();
+        let origin_bonds: Vec<Pair<usize>> = bond_table.keys().copied().collect();
+        let (maps, atoms): (Vec<usize>, Vec<Atom>) = atom_table
+            .into_iter()
+            .filter_map(|(idx, atom)| atom.and_then(|atom| Some((idx, atom))))
+            .unzip();
+        let bonds = bond_table
+            .into_iter()
+            .filter_map(|(pair, bond)| {
+                let (a, b) = pair.to_tuple();
+                maps.iter()
+                    .position(|idx| idx == a)
+                    .zip(maps.iter().position(|idx| idx == b))
+                    .zip(bond)
+            })
+            .collect::<HashMap<_, _>>();
+        Self {
+            atoms,
+            bonds,
+            maps,
+            origin_bonds,
+            origin_len,
+        }
+    }
+}
+
+impl Into<(AtomTable, BondTable)> for ExchangeData {
+    fn into(self) -> (AtomTable, BondTable) {
+        let mut bond_table: BondTable = self
+            .origin_bonds
+            .into_iter()
+            .map(|pair| (pair, None))
+            .collect();
+        bond_table.extend(self.bonds.into_iter().map(|((a, b), bond)| {
+            let a = *self.maps.get(a).expect("Index out of range");
+            let b = *self.maps.get(b).expect("Index out of range");
+            (Pair::new(a, b), Some(bond))
+        }));
+        let mut atom_table: AtomTable = (0..=self.origin_len).map(|idx| (idx, None)).collect();
+        let update_atoms: AtomTable = self
+            .maps
+            .into_iter()
+            .zip(self.atoms.into_iter().map(|atom| Some(atom)))
+            .collect();
+        atom_table.extend(update_atoms);
+        (atom_table, bond_table)
     }
 }

@@ -9,6 +9,8 @@ pub mod utils {
         hash::Hash,
     };
 
+    use serde::{Deserialize, Serialize};
+
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct UniqueValueMap<K: Hash + Eq + Clone, V: Hash + Eq + Clone> {
         key_map: HashMap<K, V>,
@@ -67,7 +69,7 @@ pub mod utils {
         }
     }
 
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
     pub struct Pair<T>(T, T);
 
     impl<T: Eq> Pair<T> {
