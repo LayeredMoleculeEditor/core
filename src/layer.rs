@@ -22,16 +22,14 @@ fn ser_vec3_f64<S>(v3: &Vector3<f64>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    let value = [v3.x, v3.y, v3.z];
-    value.serialize(serializer)
+    v3.as_slice().serialize(serializer)
 }
 
 fn der_vec3_f64<'de, D>(deserializer: D) -> Result<Vector3<f64>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let value = <[f64; 3]>::deserialize(deserializer)?;
-    Ok(Vector3::from(value))
+    <[f64; 3]>::deserialize(deserializer).map(|value| Vector3::from(value))
 }
 
 pub type AtomTable = HashMap<usize, Option<Atom>>;
@@ -269,3 +267,23 @@ impl Into<(AtomTable, BondTable)> for ExchangeData {
         (atom_table, bond_table)
     }
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct ExternalProgramLayer {
+    program: String,
+    arguments: Vec<String>,
+    #[serde(skip, default = "Uuid::new_v4")]
+    layer_id: Uuid,
+}
+
+// impl Layer for ExternalProgramLayer {
+//     fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
+//         let current = LAYER_MERGER.merge_base(base);
+//         let exchange_data = ExchangeData::from(current);
+
+//     }
+
+//     fn uuid(&self) -> &Uuid {
+//         &self.layer_id
+//     }
+// }
