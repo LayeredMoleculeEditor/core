@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use nalgebra::{Matrix3, Rotation3, Unit, Vector, Vector3};
+use nalgebra::{Matrix3, Rotation3, Unit, Vector3};
 use rayon::prelude::*;
 use uuid::Uuid;
 
@@ -20,6 +20,13 @@ pub trait Layer {
     fn uuid(&self) -> &Uuid;
 }
 
+fn merge_base(base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
+    if let Some((last, base)) = base.split_last() {
+        last.read(base)
+    } else {
+        (HashMap::new(), HashMap::new())
+    }
+}
 pub struct FillLayer {
     atoms: HashMap<usize, Option<Atom>>,
     bonds: HashMap<Pair<usize>, Option<f64>>,
@@ -28,11 +35,7 @@ pub struct FillLayer {
 
 impl Layer for FillLayer {
     fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
-        let (mut atoms, mut bonds) = if let Some((last, base)) = base.split_last() {
-            last.read(base)
-        } else {
-            (HashMap::new(), HashMap::new())
-        };
+        let (mut atoms, mut bonds) = merge_base(base);
         atoms.extend(&self.atoms);
         bonds.extend(&self.bonds);
         (atoms, bonds)
@@ -86,26 +89,22 @@ impl RotationLayer {
 
 impl Layer for RotationLayer {
     fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
-        if let Some((last, base)) = base.split_last() {
-            let (mut atom_table, bond_table) = last.read(base);
-            let (idxs, atoms): (Vec<usize>, Vec<Atom>) = atom_table
-                .par_iter()
-                .filter_map(|(idx, atom)| atom.and_then(|atom| Some((idx, atom))))
-                .unzip();
-            let rotated = atoms
-                .into_par_iter()
-                .map(|Atom { element, position }| {
-                    let vector = Vector3::from(position - self.center).transpose();
-                    let rotated = vector * self.matrix;
-                    let position = rotated.transpose() + self.center;
-                    Some(Atom { element, position })
-                })
-                .collect::<Vec<_>>();
-            atom_table.extend(idxs.into_iter().zip(rotated));
-            (atom_table, bond_table)
-        } else {
-            (HashMap::new(), HashMap::new())
-        }
+        let (mut atom_table, bond_table) = merge_base(base);
+        let (idxs, atoms): (Vec<usize>, Vec<Atom>) = atom_table
+            .par_iter()
+            .filter_map(|(idx, atom)| atom.and_then(|atom| Some((idx, atom))))
+            .unzip();
+        let rotated = atoms
+            .into_par_iter()
+            .map(|Atom { element, position }| {
+                let vector = Vector3::from(position - self.center).transpose();
+                let rotated = vector * self.matrix;
+                let position = rotated.transpose() + self.center;
+                Some(Atom { element, position })
+            })
+            .collect::<Vec<_>>();
+        atom_table.extend(idxs.into_iter().zip(rotated));
+        (atom_table, bond_table)
     }
 
     fn uuid(&self) -> &Uuid {
@@ -129,26 +128,22 @@ impl TranslateLayer {
 
 impl Layer for TranslateLayer {
     fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
-        if let Some((last, base)) = base.split_last() {
-            let (mut atom_table, bond_table) = last.read(base);
-            let (idxs, atoms): (Vec<usize>, Vec<Atom>) = atom_table
-                .par_iter()
-                .filter_map(|(idx, atom)| atom.and_then(|atom| Some((idx, atom))))
-                .unzip();
-            let translated = atoms
-                .into_par_iter()
-                .map(|Atom { element, position }| {
-                    Some(Atom {
-                        element,
-                        position: position + self.vector,
-                    })
+        let (mut atom_table, bond_table) = merge_base(base);
+        let (idxs, atoms): (Vec<usize>, Vec<Atom>) = atom_table
+            .par_iter()
+            .filter_map(|(idx, atom)| atom.and_then(|atom| Some((idx, atom))))
+            .unzip();
+        let translated = atoms
+            .into_par_iter()
+            .map(|Atom { element, position }| {
+                Some(Atom {
+                    element,
+                    position: position + self.vector,
                 })
-                .collect::<Vec<_>>();
-            atom_table.extend(idxs.into_iter().zip(translated));
-            (atom_table, bond_table)
-        } else {
-            (HashMap::new(), HashMap::new())
-        }
+            })
+            .collect::<Vec<_>>();
+        atom_table.extend(idxs.into_iter().zip(translated));
+        (atom_table, bond_table)
     }
 
     fn uuid(&self) -> &Uuid {
