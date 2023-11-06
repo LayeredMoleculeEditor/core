@@ -6,7 +6,7 @@ use std::{
 use lazy_static::lazy_static;
 use nalgebra::{Matrix3, Rotation3, Unit, Vector3};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
 use crate::utils::Pair;
@@ -14,19 +14,24 @@ use crate::utils::Pair;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Atom {
     element: usize,
-    coordinate: [f64; 3],
+    #[serde(serialize_with = "ser_vec3_f64", deserialize_with = "der_vec3_f64")]
+    position: Vector3<f64>,
 }
 
-impl Atom {
-    fn new(element: usize, x: f64, y: f64, z: f64) -> Self {
-        Self {
-            element,
-            coordinate: [x, y, z],
-        }
-    }
-    fn position(&self) -> Vector3<f64> {
-        Vector3::from(self.coordinate)
-    }
+fn ser_vec3_f64<S>(v3: &Vector3<f64>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let value = [v3.x, v3.y, v3.z];
+    value.serialize(serializer)
+}
+
+fn der_vec3_f64<'de, D>(deserializer: D) -> Result<Vector3<f64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = <[f64; 3]>::deserialize(deserializer)?;
+    Ok(Vector3::from(value))
 }
 
 pub type AtomTable = HashMap<usize, Option<Atom>>;
@@ -150,13 +155,11 @@ impl Layer for RotationLayer {
             .unzip();
         let rotated = atoms
             .into_par_iter()
-            .map(|atom| {
-                let position = atom.position();
-                let element = atom.element;
+            .map(|Atom { element, position }| {
                 let vector = Vector3::from(position - self.center).transpose();
                 let rotated = vector * self.matrix;
                 let position = rotated.transpose() + self.center;
-                Some(Atom::new(element, position.x, position.y, position.z))
+                Some(Atom { element, position })
             })
             .collect::<Vec<_>>();
         atom_table.extend(idxs.into_iter().zip(rotated));
@@ -191,9 +194,11 @@ impl Layer for TranslateLayer {
             .unzip();
         let translated = atoms
             .into_par_iter()
-            .map(|atom| {
-                let position = atom.position() + self.vector;
-                Some(Atom::new(atom.element, position.x, position.y, position.z))
+            .map(|Atom { element, position }| {
+                Some(Atom {
+                    element,
+                    position: position + self.vector,
+                })
             })
             .collect::<Vec<_>>();
         atom_table.extend(idxs.into_iter().zip(translated));
