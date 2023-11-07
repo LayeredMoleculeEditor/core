@@ -1,6 +1,7 @@
 use std::{sync::Arc, collections::HashMap};
 
 use uuid::Uuid;
+use lazy_static::lazy_static;
 
 use crate::utils::Pair;
 
@@ -46,5 +47,33 @@ impl FillLayer {
     fn update_uuid(&mut self) -> &Uuid {
         self.state_id = Uuid::new_v4();
         self.id()
+    }
+}
+
+pub struct TransparentLayer;
+pub struct BlankLayer;
+
+lazy_static! {
+    static ref TRANSPARENT_LAYER_ID: Uuid = Uuid::new_v4();
+    static ref BLANK_LAYER_ID: Uuid = Uuid::new_v4();
+}
+
+impl Layer for TransparentLayer {
+    fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
+        LAYER_MERGER.merge_base(base)    
+    }
+
+    fn id(&self) -> &Uuid {
+        &TRANSPARENT_LAYER_ID
+    }
+}
+
+impl Layer for BlankLayer {
+    fn read(&self, _: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
+        (HashMap::new(), HashMap::new())
+    }
+
+    fn id(&self) -> &Uuid {
+        &BLANK_LAYER_ID
     }
 }
