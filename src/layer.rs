@@ -35,7 +35,7 @@ where
 pub type AtomTable = HashMap<usize, Option<Atom>>;
 pub type BondTable = HashMap<Pair<usize>, Option<f64>>;
 
-pub trait Layer {
+pub trait Layer: Sync + Send {
     fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable);
     fn uuid(&self) -> &Uuid;
 }
