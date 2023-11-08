@@ -28,6 +28,9 @@ impl Layer for FillLayer {
 }
 
 impl FillLayer {
+    pub fn new() -> Self {
+        Self { atoms: HashMap::new(), bonds: HashMap::new(), state_id: Uuid::new_v4() }
+    }
     pub fn patch(&mut self, atoms: &AtomTable, bonds: &BondTable) -> &Uuid {
         self.atoms.extend(atoms);
         self.bonds.extend(bonds);
@@ -54,18 +57,8 @@ pub struct TransparentLayer;
 pub struct BlankLayer;
 
 lazy_static! {
-    static ref TRANSPARENT_LAYER_ID: Uuid = Uuid::new_v4();
     static ref BLANK_LAYER_ID: Uuid = Uuid::new_v4();
-}
-
-impl Layer for TransparentLayer {
-    fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
-        LAYER_MERGER.merge_base(base)    
-    }
-
-    fn id(&self) -> &Uuid {
-        &TRANSPARENT_LAYER_ID
-    }
+    pub static ref BLANK_LAYER: BlankLayer = BlankLayer;
 }
 
 impl Layer for BlankLayer {
