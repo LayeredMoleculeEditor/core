@@ -1,8 +1,8 @@
 pub mod filter_layer;
 
-use std::collections::HashMap;
 use nalgebra::Vector3;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::{collections::HashMap, fmt::Debug};
 use uuid::Uuid;
 
 use crate::utils::Pair;
@@ -31,6 +31,11 @@ where
 pub type AtomTable = HashMap<usize, Option<Atom>>;
 pub type BondTable = HashMap<Pair<usize>, Option<f64>>;
 
+pub trait FilterCore: Sync + Send + Debug {
+    fn transformer(&self, data: (AtomTable, BondTable)) -> (AtomTable, BondTable);
+}
+
+#[derive(Debug)]
 pub enum Layer {
     FillLayer {
         atoms: AtomTable,
@@ -38,7 +43,8 @@ pub enum Layer {
         layer_id: Uuid,
     },
     FilterLayer {
-        transformer: Box<dyn Sync + Fn((AtomTable, BondTable)) -> (AtomTable, BondTable)>,
+        type_name: String,
+        core: Box<dyn FilterCore>,
         layer_id: Uuid,
     },
 }
@@ -52,10 +58,10 @@ impl Layer {
         }
     }
 
-    pub fn new_filter_layer(transformer: Box<dyn Sync + Fn((AtomTable, BondTable)) -> (AtomTable, BondTable)>) -> Self
-    {
+    pub fn new_filter_layer(type_name: String, transformer: Box<dyn FilterCore>) -> Self {
         Self::FilterLayer {
-            transformer,
+            type_name,
+            core: transformer,
             layer_id: Uuid::new_v4(),
         }
     }
@@ -110,13 +116,15 @@ impl Layer {
                 bond_table.extend(bonds);
                 (atom_table, bond_table)
             }
-            Self::FilterLayer { transformer, .. } => transformer(base),
+            Self::FilterLayer {
+                core: transformer, ..
+            } => transformer.transformer(base),
         }
     }
 
     pub fn read(
         &self,
-        base: &[Self],
+        base: &[&Self],
         cache: Option<&mut HashMap<Vec<Uuid>, (AtomTable, BondTable)>>,
     ) -> (AtomTable, BondTable) {
         if let Some(cache) = cache {
@@ -160,6 +168,7 @@ impl Layer {
 
 pub enum LayerError {
     NotFillLayer,
+    NoSuchLayer,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -221,23 +230,3 @@ impl Into<(AtomTable, BondTable)> for ExchangeData {
         (atom_table, bond_table)
     }
 }
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct ExternalProgramLayer {
-    program: String,
-    arguments: Vec<String>,
-    #[serde(skip, default = "Uuid::new_v4")]
-    layer_id: Uuid,
-}
-
-// impl Layer for ExternalProgramLayer {
-//     fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
-//         let current = LAYER_MERGER.merge_base(base);
-//         let exchange_data = ExchangeData::from(current);
-
-//     }
-
-//     fn uuid(&self) -> &Uuid {
-//         &self.layer_id
-//     }
-// }
