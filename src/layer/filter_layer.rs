@@ -1,71 +1,37 @@
-use std::sync::Arc;
+use std::collections::HashMap;
 
-use nalgebra::{Vector3, Matrix3, Rotation3, Unit};
+use lazy_static::lazy_static;
+use nalgebra::{Rotation3, Unit, Vector3};
 use rayon::prelude::*;
-use uuid::Uuid;
 
-use super::{Atom, AtomTable, BondTable, Layer, LAYER_MERGER};
+use super::{AtomTable, BondTable};
 
-pub struct RotationLayer {
-    center: Vector3<f64>,
-    matrix: Matrix3<f64>,
-    layer_id: Uuid,
+use super::{Atom, Layer};
+
+lazy_static! {
+    pub static ref BLANK_BACKGROUND: Layer =
+        Layer::new_filter_layer(Box::new(|_| (HashMap::new(), HashMap::new())));
+    pub static ref REMOVE_BOND_LAYER: Layer =
+        Layer::new_filter_layer(Box::new(|(atoms, _)| (atoms, HashMap::new())));
+    pub static ref REMOVE_HS_LAYER: Layer =
+        Layer::new_filter_layer(Box::new(|current: (AtomTable, BondTable)| {
+            let (mut atom_table, mut bond_table) = current;
+            atom_table.retain(|_, v| {
+                v.and_then(|atom| if atom.element == 1 { Some(()) } else { None })
+                    .is_some()
+            });
+            let existed = atom_table.keys().collect::<Vec<_>>();
+            bond_table.retain(|pair, bond| {
+                let (a, b) = pair.to_tuple();
+                existed.contains(&a) && existed.contains(&b) && bond.is_some()
+            });
+            (atom_table, bond_table)
+        }));
 }
 
-impl RotationLayer {
-    pub fn new(center: Vector3<f64>, vector: Vector3<f64>, angle: f64) -> Self {
-        Self {
-            center,
-            matrix: Rotation3::from_axis_angle(&Unit::new_normalize(vector), angle)
-                .matrix()
-                .clone(),
-            layer_id: Uuid::new_v4(),
-        }
-    }
-}
-
-impl Layer for RotationLayer {
-    fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
-        let (mut atom_table, bond_table) = LAYER_MERGER.merge_base(base);
-        let (idxs, atoms): (Vec<usize>, Vec<Atom>) = atom_table
-            .par_iter()
-            .filter_map(|(idx, atom)| atom.and_then(|atom| Some((idx, atom))))
-            .unzip();
-        let rotated = atoms
-            .into_par_iter()
-            .map(|Atom { element, position }| {
-                let vector = Vector3::from(position - self.center).transpose();
-                let rotated = vector * self.matrix;
-                let position = rotated.transpose() + self.center;
-                Some(Atom { element, position })
-            })
-            .collect::<Vec<_>>();
-        atom_table.extend(idxs.into_iter().zip(rotated));
-        (atom_table, bond_table)
-    }
-
-    fn id(&self) -> &Uuid {
-        &self.layer_id
-    }
-}
-
-pub struct TranslateLayer {
-    vector: Vector3<f64>,
-    layer_id: Uuid,
-}
-
-impl TranslateLayer {
-    pub fn new(vector: Vector3<f64>) -> Self {
-        Self {
-            vector,
-            layer_id: Uuid::new_v4(),
-        }
-    }
-}
-
-impl Layer for TranslateLayer {
-    fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
-        let (mut atom_table, bond_table) = LAYER_MERGER.merge_base(base);
+pub fn create_translate_layer(vector: Vector3<f64>) -> Layer {
+    Layer::new_filter_layer(Box::new(move |current: (AtomTable, BondTable)| {
+        let (mut atom_table, bond_table) = current;
         let (idxs, atoms): (Vec<usize>, Vec<Atom>) = atom_table
             .par_iter()
             .filter_map(|(idx, atom)| atom.and_then(|atom| Some((idx, atom))))
@@ -75,15 +41,35 @@ impl Layer for TranslateLayer {
             .map(|Atom { element, position }| {
                 Some(Atom {
                     element,
-                    position: position + self.vector,
+                    position: position + vector,
                 })
             })
             .collect::<Vec<_>>();
-        atom_table.extend(idxs.into_iter().zip(translated));
+        atom_table = idxs.into_iter().zip(translated).collect();
         (atom_table, bond_table)
-    }
+    }))
+}
 
-    fn id(&self) -> &Uuid {
-        &self.layer_id
-    }
+pub fn crate_rotation_layer(center: Vector3<f64>, vector: Vector3<f64>, angle: f64) -> Layer {
+    let matrix = Rotation3::from_axis_angle(&Unit::new_normalize(vector), angle)
+        .matrix()
+        .clone();
+    Layer::new_filter_layer(Box::new(move |current: (AtomTable, BondTable)| {
+        let (mut atom_table, bond_table) = current;
+        let (idxs, atoms): (Vec<usize>, Vec<Atom>) = atom_table
+            .par_iter()
+            .filter_map(|(idx, atom)| atom.and_then(|atom| Some((idx, atom))))
+            .unzip();
+        let rotated = atoms
+            .into_par_iter()
+            .map(|Atom { element, position }| {
+                let vector = Vector3::from(position - center).transpose();
+                let rotated = vector * matrix;
+                let position = rotated.transpose() + center;
+                Some(Atom { element, position })
+            })
+            .collect::<Vec<_>>();
+        atom_table = idxs.into_iter().zip(rotated).collect();
+        (atom_table, bond_table)
+    }))
 }

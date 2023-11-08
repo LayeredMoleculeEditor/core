@@ -1,17 +1,11 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
+pub mod filter_layer;
 
-use lazy_static::lazy_static;
+use std::collections::HashMap;
 use nalgebra::Vector3;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
 use crate::utils::Pair;
-
-pub mod fill_layer;
-pub mod filter_layer;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Atom {
@@ -37,53 +31,135 @@ where
 pub type AtomTable = HashMap<usize, Option<Atom>>;
 pub type BondTable = HashMap<Pair<usize>, Option<f64>>;
 
-pub trait Layer: Sync + Send {
-    fn read(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable);
-    fn id(&self) -> &Uuid;
+pub enum Layer {
+    FillLayer {
+        atoms: AtomTable,
+        bonds: BondTable,
+        layer_id: Uuid,
+    },
+    FilterLayer {
+        transformer: Box<dyn Sync + Fn((AtomTable, BondTable)) -> (AtomTable, BondTable)>,
+        layer_id: Uuid,
+    },
 }
 
-pub struct LayerMerger {
-    cache: Arc<RwLock<HashMap<Vec<String>, (AtomTable, BondTable)>>>,
-}
-
-impl LayerMerger {
-    fn new() -> Self {
-        Self {
-            cache: Arc::new(RwLock::new(HashMap::from([(
-                vec![],
-                (HashMap::new(), HashMap::new()),
-            )]))),
+impl Layer {
+    pub fn new_fill_layer() -> Self {
+        Self::FillLayer {
+            atoms: HashMap::new(),
+            bonds: HashMap::new(),
+            layer_id: Uuid::new_v4(),
         }
     }
-    fn merge_base(&self, base: &[Arc<dyn Layer>]) -> (AtomTable, BondTable) {
-        let path = base
-            .iter()
-            .map(|layer| layer.id().to_string())
-            .collect::<Vec<_>>();
-        if let Some(cached) = self
-            .cache
-            .read()
-            .expect("Failed to load cache from RwLock")
-            .get(&path)
-        {
-            cached.clone()
-        } else {
-            if let Some((last, base)) = base.split_last() {
-                let result = last.read(base);
-                self.cache
-                    .write()
-                    .expect("Failed to write to cache in RwLock")
-                    .insert(path, result.clone());
-                result
-            } else {
-                (HashMap::new(), HashMap::new())
+
+    pub fn new_filter_layer(transformer: Box<dyn Sync + Fn((AtomTable, BondTable)) -> (AtomTable, BondTable)>) -> Self
+    {
+        Self::FilterLayer {
+            transformer,
+            layer_id: Uuid::new_v4(),
+        }
+    }
+
+    pub fn patch_atoms(&mut self, patch: &AtomTable) -> Result<&Uuid, LayerError> {
+        match self {
+            Self::FilterLayer { .. } => Err(LayerError::NotFillLayer),
+            Self::FillLayer {
+                atoms, layer_id, ..
+            } => {
+                atoms.extend(patch);
+                *layer_id = Uuid::new_v4();
+                Ok(self.id())
             }
         }
     }
+
+    pub fn patch_bonds(&mut self, patch: &BondTable) -> Result<&Uuid, LayerError> {
+        match self {
+            Self::FilterLayer { .. } => Err(LayerError::NotFillLayer),
+            Self::FillLayer {
+                bonds, layer_id, ..
+            } => {
+                bonds.extend(patch);
+                *layer_id = Uuid::new_v4();
+                Ok(self.id())
+            }
+        }
+    }
+
+    pub fn patch(&mut self, patch: (&AtomTable, &BondTable)) -> Result<&Uuid, LayerError> {
+        match self {
+            Self::FilterLayer { .. } => Err(LayerError::NotFillLayer),
+            Self::FillLayer {
+                atoms,
+                bonds,
+                layer_id,
+            } => {
+                atoms.extend(patch.0);
+                bonds.extend(patch.1);
+                *layer_id = Uuid::new_v4();
+                Ok(self.id())
+            }
+        }
+    }
+
+    fn read_base(&self, base: (AtomTable, BondTable)) -> (AtomTable, BondTable) {
+        match self {
+            Self::FillLayer { atoms, bonds, .. } => {
+                let (mut atom_table, mut bond_table) = base;
+                atom_table.extend(atoms);
+                bond_table.extend(bonds);
+                (atom_table, bond_table)
+            }
+            Self::FilterLayer { transformer, .. } => transformer(base),
+        }
+    }
+
+    pub fn read(
+        &self,
+        base: &[Self],
+        cache: Option<&mut HashMap<Vec<Uuid>, (AtomTable, BondTable)>>,
+    ) -> (AtomTable, BondTable) {
+        if let Some(cache) = cache {
+            let base_path = base
+                .iter()
+                .map(|item| item.id())
+                .cloned()
+                .collect::<Vec<Uuid>>();
+            let full_path = [base_path.clone(), vec![self.id().clone()]].concat();
+            if let Some(cached) = cache.get(&full_path) {
+                cached.clone()
+            } else if let Some(cached) = cache.get(&base_path) {
+                let composed = self.read_base(cached.clone());
+                cache.insert(full_path, composed.clone());
+                composed
+            } else {
+                let base = if let Some((last, base)) = base.split_last() {
+                    last.read(base, Some(cache))
+                } else {
+                    (HashMap::new(), HashMap::new())
+                };
+                let composed = self.read_base(base);
+                cache.insert(full_path, composed.clone());
+                composed
+            }
+        } else if let Some((last, base)) = base.split_last() {
+            let base = last.read(base, None);
+            self.read_base(base)
+        } else {
+            self.read_base((HashMap::new(), HashMap::new()))
+        }
+    }
+
+    pub fn id(&self) -> &Uuid {
+        match self {
+            Self::FillLayer { layer_id, .. } => &layer_id,
+            Self::FilterLayer { layer_id, .. } => &layer_id,
+        }
+    }
 }
 
-lazy_static! {
-    static ref LAYER_MERGER: LayerMerger = LayerMerger::new();
+pub enum LayerError {
+    NotFillLayer,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
