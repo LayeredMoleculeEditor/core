@@ -35,7 +35,9 @@ lazy_static! {
 pub enum LayerConfig {
     Transparent,
     Fill {
+        #[serde(default)]
         atoms: AtomTable,
+        #[serde(default)]
         bonds: BondTable,
     },
     HideBonds,
@@ -59,11 +61,6 @@ pub enum LayerConfig {
 }
 
 impl LayerConfig {
-    pub fn new_fill() -> Self {
-        let (atoms, bonds) = empty_tables();
-        Self::Fill { atoms, bonds }
-    }
-
     pub fn read(&self, base: &Molecule) -> Result<Molecule, &'static str> {
         let (mut atom_table, mut bond_table) = base.clone();
         match self {

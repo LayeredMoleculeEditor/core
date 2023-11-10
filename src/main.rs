@@ -8,6 +8,7 @@ use axum::{
 };
 use layer::{Layer, LayerConfig, Molecule};
 use many_to_many::ManyToMany;
+
 use utils::{InsertResult, UniqueValueMap};
 
 mod layer;
@@ -35,7 +36,7 @@ async fn main() {
         .route("/stacks", post(new_empty_stack))
         .route("/stacks/:base", post(new_stack))
         .route("/stacks/:base", patch(write_to_layer))
-        .route("/stacks/:base/fill_layer", put(add_fill_layer))
+        .route("/stacks/:base", put(overlay_to))
         .route("/ids/:idx/:id", post(set_id))
         .route("/ids/:idx", delete(remove_id))
         .route("/classes/:idx/:class", post(set_to_group))
@@ -74,12 +75,14 @@ async fn new_stack(
     }
 }
 
-async fn add_fill_layer(State(store): State<ServerStore>, Path(base): Path<usize>) -> StatusCode {
+async fn overlay_to(State(store): State<ServerStore>, Path(base): Path<usize>, Json(config): Json<LayerConfig>) -> StatusCode {
     if let Some(current) = store.write().unwrap().stacks.get_mut(base) {
-        if let Ok(overlayed) = Layer::overlay(current.clone(), LayerConfig::new_fill()) {
+        if let Ok(overlayed) = Layer::overlay(current.clone(), config) {
             *current = Arc::new(overlayed);
-        };
-        StatusCode::OK
+            StatusCode::OK
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     } else {
         StatusCode::NOT_FOUND
     }
