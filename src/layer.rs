@@ -1,11 +1,16 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    io::Write,
+    process::{Command, Stdio},
+    sync::Arc,
+};
 
 use lazy_static::lazy_static;
 use nalgebra::{Matrix3, Vector3};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::serde::{de_m3_64, de_v3_64, ser_m3_64, ser_v3_64, ser_arc_layer, de_arc_layer};
+use crate::serde::{de_arc_layer, de_m3_64, de_v3_64, ser_arc_layer, ser_m3_64, ser_v3_64};
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub struct Atom {
@@ -106,7 +111,27 @@ impl LayerConfig {
                     .collect::<HashMap<_, _>>();
             }
             Self::Plugin { command, args } => {
-                todo!()
+                let mut child = Command::new(command)
+                    .args(args)
+                    .stdin(Stdio::piped())
+                    .spawn()
+                    .map_err(|_| "Failed to start target program")?;
+                let data_to_send = serde_json::to_string(&(&atom_table, &bond_table))
+                    .map_err(|_| "Failed to stringify base data")?;
+                if let Some(ref mut stdin) = child.stdin {
+                    stdin
+                        .write_all(&data_to_send.as_bytes())
+                        .map_err(|_| "Failed to write to child stdin")?;
+                    let output = child
+                        .wait_with_output()
+                        .map_err(|_| "Failed to get data from child stdout.")?;
+                    let data = String::from_utf8_lossy(&output.stdout);
+                    let (atoms, bonds): Molecule = serde_json::from_str(&data).map_err(|_| "Failed to parse data returned from child process")?;
+                    atom_table = atoms;
+                    bond_table = bonds;
+                } else {
+                    Err("unable to write to child stdin")?;
+                }
             }
         };
         Ok((atom_table, bond_table))
