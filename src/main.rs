@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{get, patch, post, put, delete},
+    routing::{delete, get, patch, post, put},
     Json, Router,
 };
 use layer::{Layer, LayerConfig, Molecule};
@@ -107,12 +107,12 @@ async fn set_id(
     State(store): State<ServerStore>,
     Path(idx): Path<usize>,
     Path(id): Path<String>,
-) -> StatusCode {
-    let result = store.write().unwrap().id_map.insert(idx, id);
-    if let InsertResult::Duplicated(duplicated_with) = result {
-        StatusCode::BAD_REQUEST
+) -> (StatusCode, Json<Option<usize>>) {
+    if let InsertResult::Duplicated(duplicated_with) = store.write().unwrap().id_map.insert(idx, id)
+    {
+        (StatusCode::BAD_REQUEST, Json(Some(duplicated_with)))
     } else {
-        StatusCode::OK
+        (StatusCode::OK, Json(None))
     }
 }
 
