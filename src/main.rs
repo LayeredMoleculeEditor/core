@@ -3,10 +3,10 @@ use std::sync::{Arc, RwLock};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::{get, post, patch, put},
     Json, Router,
 };
-use layer::{Layer, LayerConfig};
+use layer::{Layer, LayerConfig, Molecule};
 use many_to_many::ManyToMany;
 use utils::UniqueValueMap;
 
@@ -34,7 +34,8 @@ async fn main() {
         .route("/", get(|| async { "hello, world" }))
         .route("/", post(new_empty_stack))
         .route("/:base", post(new_stack))
-        .route("/:base/fill_layer", post(add_fill_layer))
+        .route("/:base", patch(write_to_layer))
+        .route("/:base/fill_layer", put(add_fill_layer))
         .with_state(project);
 
     axum::Server::bind(&"127.0.0.1:10810".parse().unwrap())
@@ -73,6 +74,24 @@ async fn add_fill_layer(State(store): State<ServerStore>, Path(base): Path<usize
             *current = Arc::new(overlayed);
         };
         StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+async fn write_to_layer(
+    State(store): State<ServerStore>,
+    Path(base): Path<usize>,
+    Json(patch): Json<Molecule>,
+) -> StatusCode {
+    if let Some(current) = store.write().unwrap().stacks.get_mut(base) {
+        let mut updated = current.as_ref().clone();
+        if let Ok(_) = updated.write(&patch) {
+            *current = Arc::new(updated);
+            StatusCode::OK
+        } else {
+            StatusCode::BAD_REQUEST
+        }
     } else {
         StatusCode::NOT_FOUND
     }
