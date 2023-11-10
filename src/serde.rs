@@ -1,5 +1,9 @@
+use std::sync::Arc;
+
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::layer::Layer;
 
 pub fn ser_v3_64<S>(value: &Vector3<f64>, s: S) -> Result<S::Ok, S::Error>
 where
@@ -27,4 +31,20 @@ where
     D: Deserializer<'de>,
 {
     <[f64; 9]>::deserialize(de).and_then(|value| Ok(Matrix3::from_iterator(value)))
+}
+
+pub fn ser_arc_layer<S>(value: &Option<Arc<Layer>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    value.as_ref()
+        .map(|layer| layer.as_ref())
+        .serialize(serializer)
+}
+
+pub fn de_arc_layer<'de, D>(deserializer: D) -> Result<Option<Arc<Layer>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Layer::deserialize(deserializer).map(|layer| Some(Arc::new(layer)))
 }

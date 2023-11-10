@@ -5,7 +5,7 @@ use nalgebra::{Matrix3, Vector3};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::serde::{de_m3_64, de_v3_64, ser_m3_64, ser_v3_64};
+use crate::serde::{de_m3_64, de_v3_64, ser_m3_64, ser_v3_64, ser_arc_layer, de_arc_layer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub struct Atom {
@@ -54,6 +54,11 @@ pub enum LayerConfig {
 }
 
 impl LayerConfig {
+    pub fn new_fill() -> Self {
+        let (atoms, bonds) = empty_tables();
+        Self::Fill { atoms, bonds }
+    }
+
     pub fn read(&self, base: &Molecule) -> Result<Molecule, &'static str> {
         let (mut atom_table, mut bond_table) = base.clone();
         match self {
@@ -119,9 +124,10 @@ impl LayerConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Layer {
     config: LayerConfig,
+    #[serde(serialize_with = "ser_arc_layer", deserialize_with = "de_arc_layer")]
     base: Option<Arc<Layer>>,
     cached: Molecule,
 }
@@ -159,5 +165,9 @@ impl Layer {
             .unwrap_or(&EMPTY_TABLES);
         self.cached = self.config.read(base)?;
         Ok(())
+    }
+
+    pub fn clone_base(&self) -> Option<Self> {
+        self.base.as_ref().map(|value| value.as_ref().clone())
     }
 }
