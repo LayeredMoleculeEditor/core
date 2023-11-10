@@ -1,232 +1,163 @@
-pub mod filter_layer;
+use std::{collections::HashMap, sync::Arc};
 
-use nalgebra::Vector3;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::{collections::HashMap, fmt::Debug};
-use uuid::Uuid;
+use lazy_static::lazy_static;
+use nalgebra::{Matrix3, Vector3};
+use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
-use crate::utils::Pair;
+use crate::serde::{de_m3_64, de_v3_64, ser_m3_64, ser_v3_64};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub struct Atom {
     element: usize,
-    #[serde(serialize_with = "ser_vec3_f64", deserialize_with = "der_vec3_f64")]
+    #[serde(serialize_with = "ser_v3_64", deserialize_with = "de_v3_64")]
     position: Vector3<f64>,
 }
 
-fn ser_vec3_f64<S>(v3: &Vector3<f64>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    v3.as_slice().serialize(serializer)
+type AtomTable = HashMap<usize, Option<Atom>>;
+type BondTable = HashMap<(usize, usize), Option<f64>>;
+pub type Molecule = (AtomTable, BondTable);
+
+pub fn empty_tables() -> Molecule {
+    (HashMap::new(), HashMap::new())
 }
 
-fn der_vec3_f64<'de, D>(deserializer: D) -> Result<Vector3<f64>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    <[f64; 3]>::deserialize(deserializer).map(|value| Vector3::from(value))
+lazy_static! {
+    static ref EMPTY_TABLES: Molecule = empty_tables();
 }
 
-pub type AtomTable = HashMap<usize, Option<Atom>>;
-pub type BondTable = HashMap<Pair<usize>, Option<f64>>;
-
-pub trait FilterCore: Sync + Send + Debug {
-    fn transformer(&self, data: (AtomTable, BondTable)) -> (AtomTable, BondTable);
-}
-
-#[derive(Debug)]
-pub enum Layer {
-    FillLayer {
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub enum LayerConfig {
+    Transparent,
+    Fill {
         atoms: AtomTable,
         bonds: BondTable,
-        layer_id: Uuid,
     },
-    FilterLayer {
-        type_name: String,
-        core: Box<dyn FilterCore>,
-        layer_id: Uuid,
+    HideBonds,
+    HideHydrogens {
+        valence_table: HashMap<usize, usize>,
     },
+    Rotation {
+        #[serde(serialize_with = "ser_m3_64", deserialize_with = "de_m3_64")]
+        matrix: Matrix3<f64>,
+        #[serde(serialize_with = "ser_v3_64", deserialize_with = "de_v3_64")]
+        center: Vector3<f64>,
+    },
+    Translate {
+        #[serde(serialize_with = "ser_v3_64", deserialize_with = "de_v3_64")]
+        vector: Vector3<f64>,
+    },
+    Plugin {
+        command: String,
+        args: Vec<String>,
+    },
+}
+
+impl LayerConfig {
+    pub fn read(&self, base: &Molecule) -> Result<Molecule, &'static str> {
+        let (mut atom_table, mut bond_table) = base.clone();
+        match self {
+            Self::Transparent => {}
+            Self::Fill { atoms, bonds } => {
+                atom_table.extend(atoms);
+                bond_table.extend(bonds);
+            }
+            Self::HideBonds => {
+                bond_table.clear();
+            }
+            Self::HideHydrogens { valence_table } => {
+                todo!()
+            }
+            Self::Rotation { matrix, center } => {
+                let (idxs, atoms): (Vec<usize>, Vec<Atom>) = atom_table
+                    .into_par_iter()
+                    .filter_map(|(idx, atom)| atom.and_then(|atom| Some((idx, atom))))
+                    .unzip();
+                let atoms = atoms.into_par_iter().map(|Atom { element, position }| {
+                    Some(Atom {
+                        element,
+                        position: ((position - center).transpose() * matrix).transpose() - center,
+                    })
+                });
+                atom_table = idxs
+                    .into_par_iter()
+                    .zip(atoms.into_par_iter())
+                    .collect::<HashMap<_, _>>();
+            }
+            Self::Translate { vector } => {
+                let (idxs, atoms): (Vec<usize>, Vec<Atom>) = atom_table
+                    .into_par_iter()
+                    .filter_map(|(idx, atom)| atom.and_then(|atom| Some((idx, atom))))
+                    .unzip();
+                let atoms = atoms.into_par_iter().map(|Atom { element, position }| {
+                    Some(Atom {
+                        element,
+                        position: position + vector,
+                    })
+                });
+                atom_table = idxs
+                    .into_par_iter()
+                    .zip(atoms.into_par_iter())
+                    .collect::<HashMap<_, _>>();
+            }
+            Self::Plugin { command, args } => {
+                todo!()
+            }
+        };
+        Ok((atom_table, bond_table))
+    }
+
+    pub fn write(&mut self, patch: &Molecule) -> Result<(), &'static str> {
+        if let Self::Fill { atoms, bonds } = self {
+            let (patch_atoms, patch_bonds) = patch;
+            atoms.extend(patch_atoms);
+            bonds.extend(patch_bonds);
+            Ok(())
+        } else {
+            Err("Not a fill layer.")
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Layer {
+    config: LayerConfig,
+    base: Option<Arc<Layer>>,
+    cached: Molecule,
+}
+
+impl Default for Layer {
+    fn default() -> Self {
+        Self {
+            config: LayerConfig::Transparent,
+            base: None,
+            cached: empty_tables(),
+        }
+    }
 }
 
 impl Layer {
-    pub fn new_fill_layer() -> Self {
-        Self::FillLayer {
-            atoms: HashMap::new(),
-            bonds: HashMap::new(),
-            layer_id: Uuid::new_v4(),
-        }
+    pub fn overlay(base: Arc<Self>, config: LayerConfig) -> Result<Self, &'static str> {
+        let cached = config.read(&base.cached)?;
+        Ok(Self {
+            config,
+            base: Some(base.clone()),
+            cached,
+        })
     }
 
-    pub fn new_filter_layer(type_name: String, transformer: Box<dyn FilterCore>) -> Self {
-        Self::FilterLayer {
-            type_name,
-            core: transformer,
-            layer_id: Uuid::new_v4(),
-        }
+    pub fn read(&self) -> &Molecule {
+        &self.cached
     }
 
-    pub fn patch_atoms(&mut self, patch: &AtomTable) -> Result<&Uuid, LayerError> {
-        match self {
-            Self::FilterLayer { .. } => Err(LayerError::NotFillLayer),
-            Self::FillLayer {
-                atoms, layer_id, ..
-            } => {
-                atoms.extend(patch);
-                *layer_id = Uuid::new_v4();
-                Ok(self.id())
-            }
-        }
-    }
-
-    pub fn patch_bonds(&mut self, patch: &BondTable) -> Result<&Uuid, LayerError> {
-        match self {
-            Self::FilterLayer { .. } => Err(LayerError::NotFillLayer),
-            Self::FillLayer {
-                bonds, layer_id, ..
-            } => {
-                bonds.extend(patch);
-                *layer_id = Uuid::new_v4();
-                Ok(self.id())
-            }
-        }
-    }
-
-    pub fn patch(&mut self, patch: (&AtomTable, &BondTable)) -> Result<&Uuid, LayerError> {
-        match self {
-            Self::FilterLayer { .. } => Err(LayerError::NotFillLayer),
-            Self::FillLayer {
-                atoms,
-                bonds,
-                layer_id,
-            } => {
-                atoms.extend(patch.0);
-                bonds.extend(patch.1);
-                *layer_id = Uuid::new_v4();
-                Ok(self.id())
-            }
-        }
-    }
-
-    fn read_base(&self, base: (AtomTable, BondTable)) -> (AtomTable, BondTable) {
-        match self {
-            Self::FillLayer { atoms, bonds, .. } => {
-                let (mut atom_table, mut bond_table) = base;
-                atom_table.extend(atoms);
-                bond_table.extend(bonds);
-                (atom_table, bond_table)
-            }
-            Self::FilterLayer {
-                core: transformer, ..
-            } => transformer.transformer(base),
-        }
-    }
-
-    pub fn read(
-        &self,
-        base: &[&Self],
-        cache: Option<&mut HashMap<Vec<Uuid>, (AtomTable, BondTable)>>,
-    ) -> (AtomTable, BondTable) {
-        if let Some(cache) = cache {
-            let base_path = base
-                .iter()
-                .map(|item| item.id())
-                .cloned()
-                .collect::<Vec<Uuid>>();
-            let full_path = [base_path.clone(), vec![self.id().clone()]].concat();
-            if let Some(cached) = cache.get(&full_path) {
-                cached.clone()
-            } else if let Some(cached) = cache.get(&base_path) {
-                let composed = self.read_base(cached.clone());
-                cache.insert(full_path, composed.clone());
-                composed
-            } else {
-                let base = if let Some((last, base)) = base.split_last() {
-                    last.read(base, Some(cache))
-                } else {
-                    (HashMap::new(), HashMap::new())
-                };
-                let composed = self.read_base(base);
-                cache.insert(full_path, composed.clone());
-                composed
-            }
-        } else if let Some((last, base)) = base.split_last() {
-            let base = last.read(base, None);
-            self.read_base(base)
-        } else {
-            self.read_base((HashMap::new(), HashMap::new()))
-        }
-    }
-
-    pub fn id(&self) -> &Uuid {
-        match self {
-            Self::FillLayer { layer_id, .. } => &layer_id,
-            Self::FilterLayer { layer_id, .. } => &layer_id,
-        }
-    }
-}
-
-pub enum LayerError {
-    NotFillLayer,
-    NoSuchLayer,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ExchangeData {
-    atoms: Vec<Atom>,
-    bonds: HashMap<(usize, usize), f64>,
-    maps: Vec<usize>,
-    origin_bonds: Vec<Pair<usize>>,
-    origin_len: usize,
-}
-
-impl From<(AtomTable, BondTable)> for ExchangeData {
-    fn from((atom_table, bond_table): (AtomTable, BondTable)) -> Self {
-        let origin_len = atom_table.len();
-        let origin_bonds: Vec<Pair<usize>> = bond_table.keys().copied().collect();
-        let (maps, atoms): (Vec<usize>, Vec<Atom>) = atom_table
-            .into_iter()
-            .filter_map(|(idx, atom)| atom.and_then(|atom| Some((idx, atom))))
-            .unzip();
-        let bonds = bond_table
-            .into_iter()
-            .filter_map(|(pair, bond)| {
-                let (a, b) = pair.to_tuple();
-                maps.iter()
-                    .position(|idx| idx == a)
-                    .zip(maps.iter().position(|idx| idx == b))
-                    .zip(bond)
-            })
-            .collect::<HashMap<_, _>>();
-        Self {
-            atoms,
-            bonds,
-            maps,
-            origin_bonds,
-            origin_len,
-        }
-    }
-}
-
-impl Into<(AtomTable, BondTable)> for ExchangeData {
-    fn into(self) -> (AtomTable, BondTable) {
-        let mut bond_table: BondTable = self
-            .origin_bonds
-            .into_iter()
-            .map(|pair| (pair, None))
-            .collect();
-        bond_table.extend(self.bonds.into_iter().map(|((a, b), bond)| {
-            let a = *self.maps.get(a).expect("Index out of range");
-            let b = *self.maps.get(b).expect("Index out of range");
-            (Pair::new(a, b), Some(bond))
-        }));
-        let mut atom_table: AtomTable = (0..=self.origin_len).map(|idx| (idx, None)).collect();
-        let update_atoms: AtomTable = self
-            .maps
-            .into_iter()
-            .zip(self.atoms.into_iter().map(|atom| Some(atom)))
-            .collect();
-        atom_table.extend(update_atoms);
-        (atom_table, bond_table)
+    pub fn write(&mut self, patch: &Molecule) -> Result<(), &'static str> {
+        self.config.write(patch)?;
+        let base = self
+            .base
+            .as_ref()
+            .map(|layer| &layer.cached)
+            .unwrap_or(&EMPTY_TABLES);
+        self.cached = self.config.read(base)?;
+        Ok(())
     }
 }
