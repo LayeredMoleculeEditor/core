@@ -3,12 +3,12 @@ use std::sync::{Arc, RwLock};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{get, post, patch, put},
+    routing::{get, patch, post, put, delete},
     Json, Router,
 };
 use layer::{Layer, LayerConfig, Molecule};
 use many_to_many::ManyToMany;
-use utils::UniqueValueMap;
+use utils::{InsertResult, UniqueValueMap};
 
 mod layer;
 pub mod serde;
@@ -32,10 +32,16 @@ async fn main() {
 
     let router = Router::new()
         .route("/", get(|| async { "hello, world" }))
-        .route("/", post(new_empty_stack))
-        .route("/:base", post(new_stack))
-        .route("/:base", patch(write_to_layer))
-        .route("/:base/fill_layer", put(add_fill_layer))
+        .route("/stacks", post(new_empty_stack))
+        .route("/stacks/:base", post(new_stack))
+        .route("/stacks/:base", patch(write_to_layer))
+        .route("/stacks/:base/fill_layer", put(add_fill_layer))
+        .route("/ids/:idx/:id", post(set_id))
+        .route("/ids/:idx", delete(remove_id))
+        .route("/classes/:idx/:class", post(set_to_group))
+        .route("/classes/:idx/:class", delete(remove_from_group))
+        .route("/classes/:idx", delete(remove_from_all_group))
+        .route("/classes/:class", delete(remove_group))
         .with_state(project);
 
     axum::Server::bind(&"127.0.0.1:10810".parse().unwrap())
@@ -95,4 +101,53 @@ async fn write_to_layer(
     } else {
         StatusCode::NOT_FOUND
     }
+}
+
+async fn set_id(
+    State(store): State<ServerStore>,
+    Path(idx): Path<usize>,
+    Path(id): Path<String>,
+) -> StatusCode {
+    let result = store.write().unwrap().id_map.insert(idx, id);
+    if let InsertResult::Duplicated(duplicated_with) = result {
+        StatusCode::BAD_REQUEST
+    } else {
+        StatusCode::OK
+    }
+}
+
+async fn set_to_group(
+    State(store): State<ServerStore>,
+    Path(idx): Path<usize>,
+    Path(class): Path<String>,
+) -> StatusCode {
+    store.write().unwrap().class_map.insert(idx, class);
+    StatusCode::OK
+}
+
+async fn remove_id(State(store): State<ServerStore>, Path(idx): Path<usize>) -> StatusCode {
+    store.write().unwrap().id_map.remove(&idx);
+    StatusCode::OK
+}
+
+async fn remove_from_group(
+    State(store): State<ServerStore>,
+    Path(idx): Path<usize>,
+    Path(class): Path<String>,
+) -> StatusCode {
+    store.write().unwrap().class_map.remove(&idx, &class);
+    StatusCode::OK
+}
+
+async fn remove_from_all_group(
+    State(store): State<ServerStore>,
+    Path(idx): Path<usize>,
+) -> StatusCode {
+    store.write().unwrap().class_map.remove_left(&idx);
+    StatusCode::OK
+}
+
+async fn remove_group(State(store): State<ServerStore>, Path(class): Path<String>) -> StatusCode {
+    store.write().unwrap().class_map.remove_right(&class);
+    StatusCode::OK
 }
