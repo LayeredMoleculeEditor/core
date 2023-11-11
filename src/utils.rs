@@ -155,3 +155,39 @@ fn pair_creation() {
         2
     );
 }
+
+pub struct NtoN<L, R>(HashSet<(L, R)>);
+
+impl<L: Eq + Hash + Clone,R: Eq + Hash + Clone> NtoN<L, R> {
+    pub fn new() -> Self {
+        Self(HashSet::new())
+    }
+    
+    pub fn data(&self) -> &HashSet<(L, R)> {
+        &self.0
+    }
+
+    pub fn get_left(&self, left: &L) -> Vec<&R> {
+        self.0.iter().filter_map(|(l, r)| if l == left {Some(r)} else {None}).collect()
+    }
+
+    pub fn get_right(&self, right: &R) -> Vec<&L> {
+        self.0.iter().filter_map(|(l, r)| if r == right {Some(l)} else {None}).collect()
+    }
+
+    pub fn insert(&mut self, left: L, right: R) -> bool {
+        self.0.insert((left, right))
+    }
+
+    pub fn remove(&mut self, left: &L, right: &R) -> bool {
+        self.0.remove(&(left.clone(), right.clone()))
+    }
+
+    pub fn remove_left(&mut self, left: &L) {
+        self.0.retain(|(l, _)| l != left)
+    }
+
+    pub fn remove_right(&mut self, right: &R) {
+        self.0.retain(|(_, r)| r != right)
+    }
+}

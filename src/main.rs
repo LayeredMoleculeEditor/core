@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::{sync::{Arc, RwLock}, collections::{HashMap, HashSet}};
 
 use axum::{
     extract::{Path, State},
@@ -6,10 +6,9 @@ use axum::{
     routing::{delete, get, patch, post, put},
     Json, Router,
 };
-use layer::{Layer, LayerConfig, Molecule};
-use many_to_many::ManyToMany;
+use layer::{Layer, LayerConfig, Molecule, LayerTree};
 
-use utils::{InsertResult, UniqueValueMap};
+use utils::{InsertResult, UniqueValueMap, NtoN};
 
 mod layer;
 pub mod serde;
@@ -18,7 +17,7 @@ mod utils;
 struct Project {
     stacks: Vec<Arc<Layer>>,
     id_map: UniqueValueMap<usize, String>,
-    class_map: ManyToMany<usize, String>,
+    class_map: NtoN<usize, String>,
 }
 
 type ServerStore = Arc<RwLock<Project>>;
@@ -28,13 +27,13 @@ async fn main() {
     let project = Arc::new(RwLock::new(Project {
         stacks: vec![Arc::new(Layer::default())],
         id_map: UniqueValueMap::new(),
-        class_map: ManyToMany::new(),
+        class_map: NtoN::new(),
     }));
 
     let router = Router::new()
         .route("/", get(|| async { "hello, world" }))
+        .route("/export", get(export_workspace))
         .route("/stacks", post(new_empty_stack))
-        .route("/stacks/:base", post(new_stack))
         .route("/stacks/:base", patch(write_to_layer))
         .route("/stacks/:base", put(overlay_to))
         .route("/ids/:idx/:id", post(set_id))
@@ -60,24 +59,9 @@ async fn new_empty_stack(State(store): State<ServerStore>) -> StatusCode {
     StatusCode::OK
 }
 
-async fn new_stack(
-    State(store): State<ServerStore>,
-    Path(base): Path<usize>,
-) -> (StatusCode, Json<Option<usize>>) {
-    if let Some(base) = store.read().unwrap().stacks.get(base) {
-        store.write().unwrap().stacks.push(base.clone());
-        (
-            StatusCode::OK,
-            Json(Some(store.read().unwrap().stacks.len())),
-        )
-    } else {
-        (StatusCode::NOT_FOUND, Json(None))
-    }
-}
-
 async fn overlay_to(State(store): State<ServerStore>, Path(base): Path<usize>, Json(config): Json<LayerConfig>) -> StatusCode {
     if let Some(current) = store.write().unwrap().stacks.get_mut(base) {
-        if let Ok(overlayed) = Layer::overlay(current.clone(), config) {
+        if let Ok(overlayed) = Layer::overlay(Some(current.clone()), config) {
             *current = Arc::new(overlayed);
             StatusCode::OK
         } else {
@@ -153,4 +137,15 @@ async fn remove_from_all_group(
 async fn remove_group(State(store): State<ServerStore>, Path(class): Path<String>) -> StatusCode {
     store.write().unwrap().class_map.remove_right(&class);
     StatusCode::OK
+}
+
+async fn export_workspace<'a>(State(store): State<ServerStore>) -> Json<(LayerTree, HashMap<usize,String>, HashSet<(usize, String)>)> {
+    let store = store.read().unwrap();
+    let mut layer_tree = LayerTree::from(store.stacks[0].as_ref().clone());
+    for stack in &store.stacks[1..] {
+        layer_tree.merge(stack.get_config_stack()).expect("Layers in workspace has same white base");
+    };
+    let ids = store.id_map.data().clone();
+    let classes = store.class_map.data().clone(); 
+    Json((layer_tree, ids, classes))
 }

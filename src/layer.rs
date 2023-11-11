@@ -123,7 +123,8 @@ impl LayerConfig {
                         .wait_with_output()
                         .map_err(|_| "Failed to get data from child stdout.")?;
                     let data = String::from_utf8_lossy(&output.stdout);
-                    let (atoms, bonds): Molecule = serde_json::from_str(&data).map_err(|_| "Failed to parse data returned from child process")?;
+                    let (atoms, bonds): Molecule = serde_json::from_str(&data)
+                        .map_err(|_| "Failed to parse data returned from child process")?;
                     atom_table = atoms;
                     bond_table = bonds;
                 } else {
@@ -165,11 +166,15 @@ impl Default for Layer {
 }
 
 impl Layer {
-    pub fn overlay(base: Arc<Self>, config: LayerConfig) -> Result<Self, &'static str> {
-        let cached = config.read(&base.cached)?;
+    pub fn overlay(base: Option<Arc<Self>>, config: LayerConfig) -> Result<Self, &'static str> {
+        let cached = if let Some(base) = base.clone() {
+            config.read(&base.cached)?
+        } else {
+            Ok::<Molecule, &'static str>(empty_tables())?
+        };
         Ok(Self {
             config,
-            base: Some(base.clone()),
+            base,
             cached,
         })
     }
@@ -191,5 +196,122 @@ impl Layer {
 
     pub fn clone_base(&self) -> Option<Self> {
         self.base.as_ref().map(|value| value.as_ref().clone())
+    }
+
+    pub fn len(&self) -> usize {
+        if let Some(base) = &self.base {
+            base.len() + 1
+        } else {
+            1
+        }
+    }
+
+    pub fn get_deep_config(&self, layer: usize) -> Result<LayerConfig, &'static str> {
+        if layer >= self.len() {
+            Err("Layer number out of layers")
+        } else if layer == self.len() - 1 {
+            Ok(self.config.clone())
+        } else {
+            self.base
+                .as_ref()
+                .expect("should never found None base in condition")
+                .get_deep_config(layer - 1)
+        }
+    }
+
+    pub fn get_config_stack(&self) -> Vec<LayerConfig> {
+        (0..self.len())
+            .rev()
+            .map(|layer| self.get_deep_config(layer))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("should never hint this condition")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct LayerTree {
+    config: LayerConfig,
+    children: Vec<(Box<LayerTree>, bool)>,
+}
+
+impl LayerTree {
+    pub fn to_layers(&self, base: Option<Arc<Layer>>) -> Result<(Arc<Layer>, Vec<Arc<Layer>>), &'static str> {
+        let layer = Arc::new(Layer::overlay(base, self.config.clone())?);
+        let mut children = vec![];
+        for (child, enabled) in &self.children {
+            let (current, mut sub_layers) = child.to_layers(Some(layer.clone()))?;
+            children.append(&mut sub_layers);
+            if *enabled {
+                children.push(current);
+            }
+        };
+        Ok((layer, children))
+    }
+
+    pub fn merge(&mut self, stack: Vec<LayerConfig>) -> Result<bool, Vec<LayerConfig>> {
+        let current = stack
+            .last()
+            .expect("should never put empty vec in to this function");
+        if current == &self.config {
+            let mut stack = stack;
+            stack.pop();
+            if stack.len() == 0 {
+                Ok(true)
+            } else {
+                let mut stack_in_loop = Some(stack);
+                for (sub_tree, enabled) in self.children.iter_mut() {
+                    if let Some(stack) = stack_in_loop {
+                        match sub_tree.merge(stack) {
+                            Ok(result) => {
+                                *enabled = *enabled || result;
+                                stack_in_loop = None;
+                            }
+                            Err(give_back) => {
+                                stack_in_loop = Some(give_back);
+                            }
+                        }
+                    }
+                }
+                if let Some(stack) = stack_in_loop {
+                    let layer_tree = Self::from(stack);
+                    let enabled = layer_tree.children.len() == 0;
+                    self.children.push((Box::new(layer_tree), enabled))
+                };
+                Ok(false)
+            }
+        } else {
+            Err(stack)
+        }
+    }
+}
+
+impl From<Layer> for LayerTree {
+    fn from(value: Layer) -> Self {
+        Self::from(value.get_config_stack())
+    }
+}
+
+impl From<Vec<LayerConfig>> for LayerTree {
+    fn from(value: Vec<LayerConfig>) -> Self {
+        let mut stack = value;
+        let mut layer = (
+            Box::new(Self {
+                config: stack
+                    .pop()
+                    .expect("Each stack created should always contains at least 1 element"),
+                children: vec![],
+            }),
+            true,
+        );
+        while let Some(config) = stack.pop() {
+            layer = (
+                Box::new(LayerTree {
+                    config,
+                    children: vec![layer],
+                }),
+                false,
+            );
+        }
+        *layer.0
     }
 }
