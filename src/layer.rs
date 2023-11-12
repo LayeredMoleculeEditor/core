@@ -32,7 +32,7 @@ lazy_static! {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub enum LayerConfig {
+pub enum Layer {
     Transparent,
     Fill {
         #[serde(default)]
@@ -60,7 +60,7 @@ pub enum LayerConfig {
     },
 }
 
-impl LayerConfig {
+impl Layer {
     pub fn read(&self, base: &Molecule) -> Result<Molecule, &'static str> {
         let (mut atom_table, mut bond_table) = base.clone();
         match self {
@@ -148,25 +148,25 @@ impl LayerConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Layer {
-    config: LayerConfig,
+pub struct Stack {
+    config: Layer,
     #[serde(serialize_with = "ser_arc_layer", deserialize_with = "de_arc_layer")]
-    base: Option<Arc<Layer>>,
+    base: Option<Arc<Stack>>,
     cached: Molecule,
 }
 
-impl Default for Layer {
+impl Default for Stack {
     fn default() -> Self {
         Self {
-            config: LayerConfig::Transparent,
+            config: Layer::Transparent,
             base: None,
             cached: empty_tables(),
         }
     }
 }
 
-impl Layer {
-    pub fn overlay(base: Option<Arc<Self>>, config: LayerConfig) -> Result<Self, &'static str> {
+impl Stack {
+    pub fn overlay(base: Option<Arc<Self>>, config: Layer) -> Result<Self, &'static str> {
         let cached = if let Some(base) = base.clone() {
             config.read(&base.cached)?
         } else {
@@ -206,7 +206,7 @@ impl Layer {
         }
     }
 
-    pub fn get_deep_config(&self, layer: usize) -> Result<LayerConfig, &'static str> {
+    pub fn get_deep_layer(&self, layer: usize) -> Result<Layer, &'static str> {
         if layer >= self.len() {
             Err("Layer number out of layers")
         } else if layer == self.len() - 1 {
@@ -215,14 +215,14 @@ impl Layer {
             self.base
                 .as_ref()
                 .expect("should never found None base in condition")
-                .get_deep_config(layer - 1)
+                .get_deep_layer(layer - 1)
         }
     }
 
-    pub fn get_config_stack(&self) -> Vec<LayerConfig> {
+    pub fn get_layers(&self) -> Vec<Layer> {
         (0..self.len())
             .rev()
-            .map(|layer| self.get_deep_config(layer))
+            .map(|layer| self.get_deep_layer(layer))
             .collect::<Result<Vec<_>, _>>()
             .expect("should never hint this condition")
     }
@@ -230,16 +230,16 @@ impl Layer {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct LayerTree {
-    config: LayerConfig,
+    config: Layer,
     children: Vec<(Box<LayerTree>, bool)>,
 }
 
 impl LayerTree {
-    pub fn to_layers(&self, base: Option<Arc<Layer>>) -> Result<(Arc<Layer>, Vec<Arc<Layer>>), &'static str> {
-        let layer = Arc::new(Layer::overlay(base, self.config.clone())?);
+    pub fn to_stack(&self, base: Option<Arc<Stack>>) -> Result<(Arc<Stack>, Vec<Arc<Stack>>), &'static str> {
+        let layer = Arc::new(Stack::overlay(base, self.config.clone())?);
         let mut children = vec![];
         for (child, enabled) in &self.children {
-            let (current, mut sub_layers) = child.to_layers(Some(layer.clone()))?;
+            let (current, mut sub_layers) = child.to_stack(Some(layer.clone()))?;
             children.append(&mut sub_layers);
             if *enabled {
                 children.push(current);
@@ -248,7 +248,7 @@ impl LayerTree {
         Ok((layer, children))
     }
 
-    pub fn merge(&mut self, stack: Vec<LayerConfig>) -> Result<bool, Vec<LayerConfig>> {
+    pub fn merge(&mut self, stack: Vec<Layer>) -> Result<bool, Vec<Layer>> {
         let current = stack
             .last()
             .expect("should never put empty vec in to this function");
@@ -285,14 +285,14 @@ impl LayerTree {
     }
 }
 
-impl From<Layer> for LayerTree {
-    fn from(value: Layer) -> Self {
-        Self::from(value.get_config_stack())
+impl From<Stack> for LayerTree {
+    fn from(value: Stack) -> Self {
+        Self::from(value.get_layers())
     }
 }
 
-impl From<Vec<LayerConfig>> for LayerTree {
-    fn from(value: Vec<LayerConfig>) -> Self {
+impl From<Vec<Layer>> for LayerTree {
+    fn from(value: Vec<Layer>) -> Self {
         let mut stack = value;
         let mut layer = (
             Box::new(Self {
