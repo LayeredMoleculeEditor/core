@@ -1,12 +1,9 @@
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
-    f32::consts::E,
     fmt::Debug,
     hash::Hash,
 };
-
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UniqueValueMap<K: Hash + Eq + Clone, V: Hash + Eq + Clone> {
@@ -75,59 +72,6 @@ impl<K: Clone + Hash + Eq, V: Clone + Hash + Eq> UniqueValueMap<K, V> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Pair<T>(T, T);
-
-impl<T: Eq> Pair<T> {
-    pub fn to_tuple(&self) -> (&T, &T) {
-        (&self.0, &self.1)
-    }
-    pub fn get_another(&self, current: &T) -> Option<&T> {
-        let Self(a, b) = self;
-        if current == a {
-            Some(b)
-        } else if current == b {
-            Some(a)
-        } else {
-            None
-        }
-    }
-
-    pub fn contains(&self, current: &T) -> bool {
-        self.get_another(current).is_some()
-    }
-}
-
-impl<T: Ord> Pair<T> {
-    pub fn new(a: T, b: T) -> Self {
-        let mut values = [a, b];
-        values.sort();
-        let [a, b] = values;
-        Self(a, b)
-    }
-}
-
-impl<T: Hash> Hash for Pair<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let Self(a, b) = self;
-        a.hash(state);
-        b.hash(state);
-    }
-}
-
-#[derive(Debug)]
-pub enum LayerRemoveResult<T> {
-    Removed(T),
-    Shadowed,
-    None,
-}
-
-pub enum LayerInserResult<'a, T> {
-    Created,
-    Updated(T),
-    Overlayed(&'a T),
-}
-
 #[test]
 fn uniq_val_map() {
     let mut map: UniqueValueMap<String, usize> = UniqueValueMap::new();
@@ -144,26 +88,6 @@ fn uniq_val_map() {
             validate: HashSet::from([2])
         }
     )
-}
-
-#[test]
-fn pair_creation() {
-    let pair1 = Pair::new(1, 2);
-    let pair2 = Pair::new(1, 2);
-    let pair3 = Pair::new(2, 4);
-    let pair4 = Pair::new(3, 4);
-    let set = HashSet::from([pair1, pair2, pair3, pair4]);
-    assert_eq!(
-        set,
-        HashSet::from([Pair::new(1, 2), Pair::new(2, 4), Pair::new(3, 4)])
-    );
-    assert_eq!(
-        set.into_iter()
-            .filter(|pair| pair.contains(&4))
-            .collect::<Vec<_>>()
-            .len(),
-        2
-    );
 }
 
 pub struct NtoN<L, R>(HashSet<(L, R)>);
