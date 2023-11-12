@@ -1,28 +1,13 @@
 use std::{collections::HashSet, sync::Arc};
 
 use axum::{extract::Path, http::StatusCode, Extension, Json};
-use serde::Deserialize;
 
 use crate::{
     data_manager::{Stack, WorkspaceStore},
     utils::InsertResult,
 };
 
-#[derive(Deserialize)]
-pub struct AtomPathParam {
-    atom_idx: usize,
-}
-
-#[derive(Deserialize)]
-pub struct NamePathParam {
-    name: String,
-}
-
-#[derive(Deserialize)]
-pub struct AtomNamePathParam {
-    atom_idx: usize,
-    name: String,
-}
+use super::params::{AtomNamePathParam, AtomPathParam, NamePathParam};
 
 pub async fn list_ids(Extension(workspace): Extension<WorkspaceStore>) -> Json<HashSet<String>> {
     Json(

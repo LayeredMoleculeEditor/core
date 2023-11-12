@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     extract::Path,
@@ -7,11 +7,18 @@ use axum::{
     response::Response,
     Extension, Json,
 };
+use nalgebra::{Rotation3, Unit, Vector3};
 use serde::Deserialize;
 
 use crate::{
     data_manager::{Layer, Molecule, Stack, WorkspaceStore},
     error::LMECoreError,
+    utils::BondGraph,
+};
+
+use super::{
+    namespace::class_indexes,
+    params::{NamePathParam, StackNamePathParam},
 };
 
 #[derive(Deserialize)]
@@ -39,7 +46,6 @@ pub async fn read_stack(Extension(stack): Extension<Arc<Stack>>) -> Json<Molecul
 
 pub async fn write_to_layer(
     Extension(workspace): Extension<WorkspaceStore>,
-    // Extension(stack): Extension<Arc<Stack>>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
     Json(patch): Json<Molecule>,
 ) -> StatusCode {
@@ -84,5 +90,55 @@ pub async fn clone_base(
         StatusCode::OK
     } else {
         StatusCode::NOT_FOUND
+    }
+}
+
+// Complex level APIs
+pub async fn rotation_atoms(
+    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(stack): Extension<Arc<Stack>>,
+    Path(StackNamePathParam { stack_id, name }): Path<StackNamePathParam>,
+    Json((center, axis, angle)): Json<([f64; 3], [f64; 3], f64)>,
+) -> StatusCode {
+    let (_, Json(indexes)) = class_indexes(
+        Extension(workspace.clone()),
+        Extension(stack.clone()),
+        Path(NamePathParam { name }),
+    )
+    .await;
+    if indexes.len() != 0 {
+        let center = Vector3::from(center);
+        let axis = Vector3::from(axis);
+        let rotation = Rotation3::from_axis_angle(&Unit::new_normalize(axis), angle);
+        let rotation_matrix = rotation.matrix();
+        let (atoms, _) = stack.read().clone();
+        let atoms = atoms
+            .into_iter()
+            .filter_map(|(idx, atom)| {
+                atom.and_then(|atom| {
+                    if indexes.contains(&idx) {
+                        Some((idx, atom))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .map(|(idx, atom)| {
+                (
+                    idx,
+                    Some(atom.update_position(|origin| {
+                        ((origin - center).transpose() * rotation_matrix).transpose() + center
+                    })),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        write_to_layer(
+            Extension(workspace),
+            Path(StackPathParam { stack_id }),
+            Json((atoms, BondGraph::new())),
+        )
+        .await
+    } else {
+        StatusCode::OK
     }
 }

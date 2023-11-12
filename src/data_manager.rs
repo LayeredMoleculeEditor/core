@@ -29,6 +29,22 @@ pub struct Atom {
     position: Vector3<f64>,
 }
 
+impl Atom {
+    pub fn new(element: usize, position: Vector3<f64>) -> Self {
+        Self { element, position }
+    }
+
+    pub fn update_position<F>(self, f: F) -> Self
+    where
+        F: Fn(Vector3<f64>) -> Vector3<f64>,
+    {
+        Self {
+            element: self.element,
+            position: f(self.position),
+        }
+    }
+}
+
 type AtomTable = HashMap<usize, Option<Atom>>;
 pub type Molecule = (AtomTable, BondGraph);
 
