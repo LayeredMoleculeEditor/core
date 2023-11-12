@@ -1,6 +1,7 @@
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
+    f32::consts::E,
     fmt::Debug,
     hash::Hash,
 };
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UniqueValueMap<K: Hash + Eq + Clone, V: Hash + Eq + Clone> {
-    key_map: HashMap<K, V>,
+    map: HashMap<K, V>,
     validate: HashSet<V>,
 }
 
@@ -23,18 +24,27 @@ pub enum InsertResult<K, V> {
 impl<K: Clone + Hash + Eq, V: Clone + Hash + Eq> UniqueValueMap<K, V> {
     pub fn new() -> Self {
         Self {
-            key_map: HashMap::new(),
+            map: HashMap::new(),
             validate: HashSet::new(),
         }
     }
 
+    pub fn from_map(map: HashMap<K, V>) -> Result<Self, HashMap<K, V>> {
+        let validate = map.values().cloned().collect::<HashSet<_>>();
+        if validate.len() == map.len() {
+            Ok(Self { map, validate })
+        } else {
+            Err(map)
+        }
+    }
+
     pub fn data(&self) -> &HashMap<K, V> {
-        &self.key_map
+        &self.map
     }
 
     pub fn insert(&mut self, k: K, v: V) -> InsertResult<K, V> {
         if self.validate.contains(&v) {
-            self.key_map
+            self.map
                 .iter()
                 .find_map(|(key, value)| if value == &v { Some(key) } else { None })
                 .and_then(|key| Some(InsertResult::Duplicated(key.clone())))
@@ -42,7 +52,7 @@ impl<K: Clone + Hash + Eq, V: Clone + Hash + Eq> UniqueValueMap<K, V> {
         } else {
             self.validate.insert(v.clone());
             let result = self
-                .key_map
+                .map
                 .insert(k, v)
                 .and_then(|v| Some(InsertResult::Updated(v)))
                 .unwrap_or(InsertResult::Created);
@@ -57,7 +67,7 @@ impl<K: Clone + Hash + Eq, V: Clone + Hash + Eq> UniqueValueMap<K, V> {
     where
         K: Borrow<Q>,
     {
-        let removed = self.key_map.remove(k);
+        let removed = self.map.remove(k);
         if let Some(value) = &removed {
             self.validate.remove(value);
         }
@@ -130,7 +140,7 @@ fn uniq_val_map() {
     assert_eq!(
         map,
         UniqueValueMap {
-            key_map: HashMap::from([("center".to_string(), 2)]),
+            map: HashMap::from([("center".to_string(), 2)]),
             validate: HashSet::from([2])
         }
     )
@@ -158,21 +168,27 @@ fn pair_creation() {
 
 pub struct NtoN<L, R>(HashSet<(L, R)>);
 
-impl<L: Eq + Hash + Clone,R: Eq + Hash + Clone> NtoN<L, R> {
+impl<L: Eq + Hash + Clone, R: Eq + Hash + Clone> NtoN<L, R> {
     pub fn new() -> Self {
         Self(HashSet::new())
     }
-    
+
     pub fn data(&self) -> &HashSet<(L, R)> {
         &self.0
     }
 
     pub fn get_left(&self, left: &L) -> Vec<&R> {
-        self.0.iter().filter_map(|(l, r)| if l == left {Some(r)} else {None}).collect()
+        self.0
+            .iter()
+            .filter_map(|(l, r)| if l == left { Some(r) } else { None })
+            .collect()
     }
 
     pub fn get_right(&self, right: &R) -> Vec<&L> {
-        self.0.iter().filter_map(|(l, r)| if r == right {Some(l)} else {None}).collect()
+        self.0
+            .iter()
+            .filter_map(|(l, r)| if r == right { Some(l) } else { None })
+            .collect()
     }
 
     pub fn insert(&mut self, left: L, right: R) -> bool {
@@ -189,5 +205,17 @@ impl<L: Eq + Hash + Clone,R: Eq + Hash + Clone> NtoN<L, R> {
 
     pub fn remove_right(&mut self, right: &R) {
         self.0.retain(|(_, r)| r != right)
+    }
+}
+
+impl<K,V> From<HashSet<(K,V)>> for NtoN<K, V> {
+    fn from(value: HashSet<(K,V)>) -> Self {
+        Self(value)
+    }
+}
+
+impl<K,V> Into<HashSet<(K,V)>> for NtoN<K,V> {
+    fn into(self) -> HashSet<(K,V)> {
+        self.0
     }
 }
