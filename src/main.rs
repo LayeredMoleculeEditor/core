@@ -34,17 +34,32 @@ async fn main() {
     }));
 
     let router = Router::new()
-        .route("/", get(|| async { "hello, world" }))
         .route("/load", put(load_workspace))
+        
         .route("/export", get(export_workspace))
+        .route(
+            "/stacks",
+            get(|State(store): State<ServerStore>| async move {
+                Json(
+                    store
+                        .read()
+                        .unwrap()
+                        .stacks
+                        .iter()
+                        .map(|stack| stack.len())
+                        .collect::<Vec<_>>(),
+                )
+            }),
+        )
         .route("/stacks", post(new_empty_stack))
-        .route("/stacks/:base", patch(write_to_layer))
-        .route("/stacks/:base", put(overlay_to))
-        .route("/ids/:idx/:id", post(set_id))
+        .route("/stacks/:idx", get(read_stack))
+        .route("/stacks/:idx", patch(write_to_layer))
+        .route("/stacks/:idx", put(overlay_to))
+        .route("/atoms/:idx/id/:id", post(set_id))
+        .route("/atoms/:idx/class/:class", post(set_to_group))
+        .route("/atoms/:idx/class/:class", delete(remove_from_group))
+        .route("/atoms/:idx/class", delete(remove_from_all_group))
         .route("/ids/:idx", delete(remove_id))
-        .route("/classes/:idx/:class", post(set_to_group))
-        .route("/classes/:idx/:class", delete(remove_from_group))
-        .route("/classes/:idx", delete(remove_from_all_group))
         .route("/classes/:class", delete(remove_group))
         .with_state(project);
 
@@ -65,10 +80,10 @@ async fn new_empty_stack(State(store): State<ServerStore>) -> StatusCode {
 
 async fn overlay_to(
     State(store): State<ServerStore>,
-    Path(base): Path<usize>,
+    Path(idx): Path<usize>,
     Json(config): Json<Layer>,
 ) -> StatusCode {
-    if let Some(current) = store.write().unwrap().stacks.get_mut(base) {
+    if let Some(current) = store.write().unwrap().stacks.get_mut(idx) {
         if let Ok(overlayed) = Stack::overlay(Some(current.clone()), config) {
             *current = Arc::new(overlayed);
             StatusCode::OK
@@ -82,10 +97,10 @@ async fn overlay_to(
 
 async fn write_to_layer(
     State(store): State<ServerStore>,
-    Path(base): Path<usize>,
+    Path(idx): Path<usize>,
     Json(patch): Json<Molecule>,
 ) -> StatusCode {
-    if let Some(current) = store.write().unwrap().stacks.get_mut(base) {
+    if let Some(current) = store.write().unwrap().stacks.get_mut(idx) {
         let mut updated = current.as_ref().clone();
         if let Ok(_) = updated.write(&patch) {
             *current = Arc::new(updated);
@@ -155,7 +170,7 @@ async fn export_workspace(
     for stack in &store.stacks[1..] {
         layer_tree
             .merge(stack.get_layers())
-            .expect("Layers in workspace has same white base");
+            .expect("Layers in workspace has same white idx");
     }
     let ids = store.id_map.data().clone();
     let classes = store.class_map.data().clone();
@@ -187,5 +202,16 @@ async fn load_workspace(
         }
     } else {
         StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+async fn read_stack(
+    State(store): State<ServerStore>,
+    Path(idx): Path<usize>,
+) -> (StatusCode, Json<Option<Molecule>>) {
+    if let Some(stack) = store.read().unwrap().stacks.get(idx) {
+        (StatusCode::OK, Json(Some(stack.read().clone())))
+    } else {
+        (StatusCode::NOT_FOUND, Json(None))
     }
 }
