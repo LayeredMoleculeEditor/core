@@ -19,3 +19,4 @@ uuid = { version = "1.5.0", features = [
     "macro-diagnostics", # Enable better diagnostics for compile-time UUIDs
 ]}
 nanoid = "0.4.0"
+serde_yaml = "0.9.27"

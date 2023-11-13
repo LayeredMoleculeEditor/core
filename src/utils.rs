@@ -3,7 +3,11 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     hash::Hash,
+    iter::Zip,
+    slice::Iter
 };
+
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UniqueValueMap<K: Hash + Eq + Clone, V: Hash + Eq + Clone> {
@@ -132,14 +136,132 @@ impl<L: Eq + Hash + Clone, R: Eq + Hash + Clone> NtoN<L, R> {
     }
 }
 
-impl<K,V> From<HashSet<(K,V)>> for NtoN<K, V> {
-    fn from(value: HashSet<(K,V)>) -> Self {
+impl<K, V> From<HashSet<(K, V)>> for NtoN<K, V> {
+    fn from(value: HashSet<(K, V)>) -> Self {
         Self(value)
     }
 }
 
-impl<K,V> Into<HashSet<(K,V)>> for NtoN<K,V> {
-    fn into(self) -> HashSet<(K,V)> {
+impl<K, V> Into<HashSet<(K, V)>> for NtoN<K, V> {
+    fn into(self) -> HashSet<(K, V)> {
         self.0
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pair<T>(T, T);
+
+impl<T: Eq> Pair<T> {
+    pub fn get_another(&self, current: &T) -> Option<&T> {
+        let Self(a, b) = self;
+        if a == current {
+            Some(b)
+        } else if b == current {
+            Some(a)
+        } else {
+            None
+        }
+    }
+
+    pub fn contains(&self, current: &T) -> bool {
+        self.get_another(current).is_some()
+    }
+}
+
+impl<T: Ord> From<(T, T)> for Pair<T> {
+    fn from((a, b): (T, T)) -> Self {
+        Self::from([a, b])
+    }
+}
+
+impl<T: Ord> From<[T; 2]> for Pair<T> {
+    fn from(mut value: [T; 2]) -> Self {
+        value.sort();
+        let [a, b] = value;
+        Self(a, b)
+    }
+}
+
+impl<T: Hash> Hash for Pair<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let Self(a, b) = self;
+        a.hash(state);
+        b.hash(state);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BondGraph {
+    indexes: Vec<Pair<usize>>,
+    values: Vec<Option<f64>>,
+}
+
+impl<'a> BondGraph {
+    pub fn new() -> Self {
+        Self {
+            indexes: vec![],
+            values: vec![],
+        }
+    }
+
+    fn position(&self, key: &Pair<usize>) -> Option<usize> {
+        self.indexes.iter().position(|k| k == key)
+    }
+
+    pub fn insert(&mut self, key: Pair<usize>, value: Option<f64>) -> Option<Option<f64>> {
+        if let Some(position) = self.position(&key) {
+            let origin = self.values[position];
+            self.values[position] = value;
+            Some(origin)
+        } else {
+            self.indexes.push(key);
+            self.values.push(value);
+            None
+        }
+    }
+
+    pub fn remove(&mut self, key: &Pair<usize>) -> Option<Option<f64>> {
+        if let Some(position) = self.position(key) {
+            self.indexes.remove(position);
+            Some(self.values.remove(position))
+        } else {
+            None
+        }
+    }
+
+    pub fn extend<T>(&mut self, iter: T)
+    where
+        T: IntoIterator<Item = (&'a Pair<usize>, &'a Option<f64>)>,
+    {
+        for (key, value) in iter {
+            self.insert(key.clone(), value.clone());
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.indexes.clear();
+        self.values.clear();
+    }
+}
+
+impl Default for BondGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<'a> IntoIterator for &'a BondGraph {
+    type Item = (&'a Pair<usize>, &'a Option<f64>);
+    type IntoIter = Zip<Iter<'a, Pair<usize>>, Iter<'a, Option<f64>>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.indexes.iter().zip(self.values.iter())
+    }
+}
+
+#[test]
+fn bond_graph_serde() {
+    let mut bg = BondGraph::new();
+    bg.insert(Pair(1, 2), Some(1.5));
+    bg.insert(Pair(3,4), Some(1.5));
+    println!("{:#?}", serde_json::to_string(&bg));
 }

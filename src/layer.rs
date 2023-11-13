@@ -10,7 +10,7 @@ use nalgebra::{Matrix3, Vector3};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::serde::{de_arc_layer, de_m3_64, de_v3_64, ser_arc_layer, ser_m3_64, ser_v3_64};
+use crate::{serde::{de_arc_layer, de_m3_64, de_v3_64, ser_arc_layer, ser_m3_64, ser_v3_64}, utils::BondGraph};
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub struct Atom {
@@ -20,11 +20,10 @@ pub struct Atom {
 }
 
 type AtomTable = HashMap<usize, Option<Atom>>;
-type BondTable = HashMap<(usize, usize), Option<f64>>;
-pub type Molecule = (AtomTable, BondTable);
+pub type Molecule = (AtomTable, BondGraph);
 
 pub fn empty_tables() -> Molecule {
-    (HashMap::new(), HashMap::new())
+    (HashMap::new(), BondGraph::new())
 }
 
 lazy_static! {
@@ -38,7 +37,7 @@ pub enum Layer {
         #[serde(default)]
         atoms: AtomTable,
         #[serde(default)]
-        bonds: BondTable,
+        bonds: BondGraph,
     },
     HideBonds,
     HideHydrogens {
@@ -317,10 +316,6 @@ impl From<Vec<Layer>> for LayerTree {
 
 #[test]
 fn merge_layer() {
-    let mut stacks = vec![Arc::new(Stack { config: Layer::Transparent, base: None, cached: empty_tables()})];
-    stacks.push(stacks[0].clone());
-    stacks[1] = Arc::new(Stack::overlay(Some(stacks[1].clone()), Layer::Fill { atoms: HashMap::new(), bonds: HashMap::new() }).unwrap());
-    let mut tree = LayerTree::from(stacks[0].as_ref().clone());
-    let result = tree.merge(stacks[1].get_layers());
-    println!("{:#?}", result);
+    let ser = serde_json::to_string(&HashMap::from([((1,2), 3.), ((1,0), 1.)]));
+    println!("{}", ser.unwrap());
 }
