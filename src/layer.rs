@@ -215,13 +215,12 @@ impl Stack {
             self.base
                 .as_ref()
                 .expect("should never found None base in condition")
-                .get_deep_layer(layer - 1)
+                .get_deep_layer(layer)
         }
     }
 
     pub fn get_layers(&self) -> Vec<Layer> {
         (0..self.len())
-            .rev()
             .map(|layer| self.get_deep_layer(layer))
             .collect::<Result<Vec<_>, _>>()
             .expect("should never hint this condition")
@@ -248,12 +247,12 @@ impl LayerTree {
         Ok((layer, children))
     }
 
-    pub fn merge(&mut self, stack: Vec<Layer>) -> Result<bool, Vec<Layer>> {
+    pub fn merge(&mut self, mut stack: Vec<Layer>) -> Result<bool, Vec<Layer>> {
+        stack.reverse();
         let current = stack
             .last()
             .expect("should never put empty vec in to this function");
         if current == &self.config {
-            let mut stack = stack;
             stack.pop();
             if stack.len() == 0 {
                 Ok(true)
@@ -314,4 +313,14 @@ impl From<Vec<Layer>> for LayerTree {
         }
         *layer.0
     }
+}
+
+#[test]
+fn merge_layer() {
+    let mut stacks = vec![Arc::new(Stack { config: Layer::Transparent, base: None, cached: empty_tables()})];
+    stacks.push(stacks[0].clone());
+    stacks[1] = Arc::new(Stack::overlay(Some(stacks[1].clone()), Layer::Fill { atoms: HashMap::new(), bonds: HashMap::new() }).unwrap());
+    let mut tree = LayerTree::from(stacks[0].as_ref().clone());
+    let result = tree.merge(stacks[1].get_layers());
+    println!("{:#?}", result);
 }
