@@ -37,7 +37,8 @@ pub fn ser_arc_layer<S>(value: &Option<Arc<Stack>>, serializer: S) -> Result<S::
 where
     S: Serializer,
 {
-    value.as_ref()
+    value
+        .as_ref()
         .map(|layer| layer.as_ref())
         .serialize(serializer)
 }

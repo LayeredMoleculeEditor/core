@@ -4,7 +4,7 @@ use std::{
     fmt::Debug,
     hash::Hash,
     iter::Zip,
-    slice::Iter
+    slice::Iter,
 };
 
 use serde::{Deserialize, Serialize};
@@ -262,6 +262,6 @@ impl<'a> IntoIterator for &'a BondGraph {
 fn bond_graph_serde() {
     let mut bg = BondGraph::new();
     bg.insert(Pair(1, 2), Some(1.5));
-    bg.insert(Pair(3,4), Some(1.5));
+    bg.insert(Pair(3, 4), Some(1.5));
     println!("{:#?}", serde_json::to_string(&bg));
 }

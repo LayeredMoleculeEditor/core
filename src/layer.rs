@@ -10,7 +10,10 @@ use nalgebra::{Matrix3, Vector3};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{serde::{de_arc_layer, de_m3_64, de_v3_64, ser_arc_layer, ser_m3_64, ser_v3_64}, utils::BondGraph};
+use crate::{
+    serde::{de_arc_layer, de_m3_64, de_v3_64, ser_arc_layer, ser_m3_64, ser_v3_64},
+    utils::BondGraph,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub struct Atom {
@@ -233,7 +236,10 @@ pub struct LayerTree {
 }
 
 impl LayerTree {
-    pub fn to_stack(&self, base: Option<Arc<Stack>>) -> Result<(Arc<Stack>, Vec<Arc<Stack>>), &'static str> {
+    pub fn to_stack(
+        &self,
+        base: Option<Arc<Stack>>,
+    ) -> Result<(Arc<Stack>, Vec<Arc<Stack>>), &'static str> {
         let layer = Arc::new(Stack::overlay(base, self.config.clone())?);
         let mut children = vec![];
         for (child, enabled) in &self.children {
@@ -242,7 +248,7 @@ impl LayerTree {
             if *enabled {
                 children.push(current);
             }
-        };
+        }
         Ok((layer, children))
     }
 
@@ -316,6 +322,6 @@ impl From<Vec<Layer>> for LayerTree {
 
 #[test]
 fn merge_layer() {
-    let ser = serde_json::to_string(&HashMap::from([((1,2), 3.), ((1,0), 1.)]));
+    let ser = serde_json::to_string(&HashMap::from([((1, 2), 3.), ((1, 0), 1.)]));
     println!("{}", ser.unwrap());
 }
