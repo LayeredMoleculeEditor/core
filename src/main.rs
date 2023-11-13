@@ -35,22 +35,8 @@ async fn main() {
 
     let router = Router::new()
         .route("/load", put(load_workspace))
-        
         .route("/export", get(export_workspace))
-        .route(
-            "/stacks",
-            get(|State(store): State<ServerStore>| async move {
-                Json(
-                    store
-                        .read()
-                        .unwrap()
-                        .stacks
-                        .iter()
-                        .map(|stack| stack.len())
-                        .collect::<Vec<_>>(),
-                )
-            }),
-        )
+        .route("/stacks", get(get_stacks))
         .route("/stacks", post(new_empty_stack))
         .route("/stacks/:idx", get(read_stack))
         .route("/stacks/:idx", patch(write_to_layer))
@@ -67,6 +53,18 @@ async fn main() {
         .serve(router.into_make_service())
         .await
         .unwrap()
+}
+
+async fn get_stacks(State(store): State<ServerStore>) -> Json<Vec<usize>> {
+    Json(
+        store
+            .read()
+            .unwrap()
+            .stacks
+            .iter()
+            .map(|stack| stack.len())
+            .collect::<Vec<_>>(),
+    )
 }
 
 async fn new_empty_stack(State(store): State<ServerStore>) -> StatusCode {
