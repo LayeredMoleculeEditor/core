@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Arc, RwLock},
-};
+use std::collections::{HashMap, HashSet};
 
 use axum::{
     extract::{Path, State},
@@ -9,7 +6,7 @@ use axum::{
     routing::{delete, get, patch, post, put},
     Json, Router,
 };
-use data_manager::{Layer, LayerTree, Molecule, Stack};
+use data_manager::{Layer, LayerTree, Molecule, Workspace, create_server_store, ServerStore, WorkspaceError};
 
 use utils::{InsertResult, NtoN, UniqueValueMap};
 
@@ -17,21 +14,9 @@ mod data_manager;
 pub mod serde;
 mod utils;
 
-struct Workspace {
-    stacks: Vec<Arc<Stack>>,
-    id_map: UniqueValueMap<usize, String>,
-    class_map: NtoN<usize, String>,
-}
-
-type ServerStore = Arc<RwLock<Workspace>>;
-
 #[tokio::main]
 async fn main() {
-    let project = Arc::new(RwLock::new(Workspace {
-        stacks: vec![Arc::new(Stack::default())],
-        id_map: UniqueValueMap::new(),
-        class_map: NtoN::new(),
-    }));
+    let project = create_server_store();
 
     let router = Router::new()
         .route("/load", put(load_workspace))
@@ -57,22 +42,12 @@ async fn main() {
 
 async fn get_stacks(State(store): State<ServerStore>) -> Json<Vec<usize>> {
     Json(
-        store
-            .read()
-            .unwrap()
-            .stacks
-            .iter()
-            .map(|stack| stack.len())
-            .collect::<Vec<_>>(),
+        store.read().unwrap().get_stacks()
     )
 }
 
 async fn new_empty_stack(State(store): State<ServerStore>) -> StatusCode {
-    store
-        .write()
-        .unwrap()
-        .stacks
-        .push(Arc::new(Stack::default()));
+    store.write().unwrap().new_empty_stack();
     StatusCode::OK
 }
 
@@ -81,15 +56,12 @@ async fn overlay_to(
     Path(idx): Path<usize>,
     Json(config): Json<Layer>,
 ) -> StatusCode {
-    if let Some(current) = store.write().unwrap().stacks.get_mut(idx) {
-        if let Ok(overlayed) = Stack::overlay(Some(current.clone()), config) {
-            *current = Arc::new(overlayed);
-            StatusCode::OK
-        } else {
-            StatusCode::INTERNAL_SERVER_ERROR
+    match store.write().unwrap().overlay_to(idx, config) {
+        Ok(_) => StatusCode::OK,
+        Err(err) => match err {
+            WorkspaceError::NoSuchStack => StatusCode::NOT_FOUND,
+            _ => StatusCode::INTERNAL_SERVER_ERROR
         }
-    } else {
-        StatusCode::NOT_FOUND
     }
 }
 
@@ -98,16 +70,14 @@ async fn write_to_layer(
     Path(idx): Path<usize>,
     Json(patch): Json<Molecule>,
 ) -> StatusCode {
-    if let Some(current) = store.write().unwrap().stacks.get_mut(idx) {
-        let mut updated = current.as_ref().clone();
-        if let Ok(_) = updated.write(&patch) {
-            *current = Arc::new(updated);
-            StatusCode::OK
-        } else {
-            StatusCode::BAD_REQUEST
+    match store.write().unwrap().write_to_layer(idx, &patch) {
+        Ok(_) => StatusCode::OK,
+        Err(err) => match err {
+            WorkspaceError::NotFillLayer => StatusCode::BAD_REQUEST,
+            WorkspaceError::NoSuchStack => StatusCode::NOT_FOUND,
+            _ => StatusCode::INTERNAL_SERVER_ERROR
         }
-    } else {
-        StatusCode::NOT_FOUND
+        
     }
 }
 
@@ -116,7 +86,7 @@ async fn set_id(
     Path(idx): Path<usize>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<Option<usize>>) {
-    if let InsertResult::Duplicated(duplicated_with) = store.write().unwrap().id_map.insert(idx, id)
+    if let InsertResult::Duplicated(duplicated_with) = store.write().unwrap().set_id(idx, id)
     {
         (StatusCode::BAD_REQUEST, Json(Some(duplicated_with)))
     } else {
@@ -129,12 +99,12 @@ async fn set_to_class(
     Path(idx): Path<usize>,
     Path(class): Path<String>,
 ) -> StatusCode {
-    store.write().unwrap().class_map.insert(idx, class);
+    store.write().unwrap().set_to_class(idx, class);
     StatusCode::OK
 }
 
 async fn remove_id(State(store): State<ServerStore>, Path(idx): Path<usize>) -> StatusCode {
-    store.write().unwrap().id_map.remove(&idx);
+    store.write().unwrap().remove_id(idx);
     StatusCode::OK
 }
 
@@ -143,7 +113,7 @@ async fn remove_from_class(
     Path(idx): Path<usize>,
     Path(class): Path<String>,
 ) -> StatusCode {
-    store.write().unwrap().class_map.remove(&idx, &class);
+    store.write().unwrap().remove_from_class(idx, &class);
     StatusCode::OK
 }
 
@@ -151,28 +121,19 @@ async fn remove_from_all_class(
     State(store): State<ServerStore>,
     Path(idx): Path<usize>,
 ) -> StatusCode {
-    store.write().unwrap().class_map.remove_left(&idx);
+    store.write().unwrap().remove_from_all_class(idx);
     StatusCode::OK
 }
 
 async fn remove_class(State(store): State<ServerStore>, Path(class): Path<String>) -> StatusCode {
-    store.write().unwrap().class_map.remove_right(&class);
+    store.write().unwrap().remove_class(&class);
     StatusCode::OK
 }
 
 async fn export_workspace(
     State(store): State<ServerStore>,
 ) -> Json<(LayerTree, HashMap<usize, String>, HashSet<(usize, String)>)> {
-    let store = store.read().unwrap();
-    let mut layer_tree = LayerTree::from(store.stacks[0].as_ref().clone());
-    for stack in &store.stacks[1..] {
-        layer_tree
-            .merge(stack.get_layers())
-            .expect("Layers in workspace has same white idx");
-    }
-    let ids = store.id_map.data().clone();
-    let classes = store.class_map.data().clone();
-    Json((layer_tree, ids, classes))
+    Json(store.read().unwrap().export())
 }
 
 async fn load_workspace(
@@ -188,12 +149,7 @@ async fn load_workspace(
         stacks.append(&mut others);
         if let Ok(id_map) = UniqueValueMap::from_map(ids) {
             let class_map = NtoN::from(classes);
-            let updated = Workspace {
-                stacks,
-                id_map,
-                class_map,
-            };
-            *store.write().unwrap() = updated;
+            *store.write().unwrap() = Workspace::from((stacks, id_map, class_map));
             StatusCode::OK
         } else {
             StatusCode::BAD_REQUEST
@@ -207,7 +163,7 @@ async fn read_stack(
     State(store): State<ServerStore>,
     Path(idx): Path<usize>,
 ) -> (StatusCode, Json<Option<Molecule>>) {
-    if let Some(stack) = store.read().unwrap().stacks.get(idx) {
+    if let Some(stack) = store.read().unwrap().get_stack(idx) {
         (StatusCode::OK, Json(Some(stack.read().clone())))
     } else {
         (StatusCode::NOT_FOUND, Json(None))

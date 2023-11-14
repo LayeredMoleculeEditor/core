@@ -1,8 +1,8 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::Write,
     process::{Command, Stdio},
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 use lazy_static::lazy_static;
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     serde::{de_arc_layer, de_m3_64, de_v3_64, ser_arc_layer, ser_m3_64, ser_v3_64},
-    utils::BondGraph,
+    utils::{BondGraph, InsertResult, NtoN, UniqueValueMap},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
@@ -324,4 +324,142 @@ impl From<Vec<Layer>> for LayerTree {
 fn merge_layer() {
     let ser = serde_json::to_string(&HashMap::from([((1, 2), 3.), ((1, 0), 1.)]));
     println!("{}", ser.unwrap());
+}
+
+pub struct Workspace {
+    stacks: Vec<Arc<Stack>>,
+    id_map: UniqueValueMap<usize, String>,
+    class_map: NtoN<usize, String>,
+}
+
+impl Workspace {
+    pub fn new() -> Self {
+        Workspace {
+            stacks: vec![Arc::new(Stack::default())],
+            id_map: UniqueValueMap::new(),
+            class_map: NtoN::new(),
+        }
+    }
+
+    pub fn get_stack(&self, idx: usize) -> Option<&Arc<Stack>> {
+        self.stacks.get(idx)
+    }
+
+    fn get_stack_mut(&mut self, idx: usize) -> Option<&mut Arc<Stack>> {
+        self.stacks.get_mut(idx)
+    }
+
+    pub fn get_stacks(&self) -> Vec<usize> {
+        self.stacks.par_iter().map(|stack| stack.len()).collect::<Vec<_>>()
+    }
+
+    pub fn new_empty_stack(&mut self) {
+        self.stacks.push(Arc::new(Stack::default()));
+    }
+
+    pub fn overlay_to(&mut self, idx: usize, config: Layer) -> Result<(), WorkspaceError> {
+        if let Some(current) = self.get_stack_mut(idx) {
+            match Stack::overlay(Some(current.clone()), config) {
+                Ok(overlayed) => {
+                    *current = Arc::new(overlayed);
+                    Ok(())
+                }
+                Err(err) => Err(WorkspaceError::PluginError(err.to_string())),
+            }
+        } else {
+            Err(WorkspaceError::NoSuchStack)
+        }
+    }
+
+    pub fn write_to_layer(&mut self, idx: usize, patch: &Molecule) -> Result<(), WorkspaceError> {
+        if let Some(current) = self.get_stack_mut(idx) {
+            let mut updated = current.as_ref().clone();
+            match updated.write(patch) {
+                Ok(_) => {
+                    *current = Arc::new(updated);
+                    Ok(())
+                }
+                Err(err) => Err(WorkspaceError::NotFillLayer),
+            }
+        } else {
+            Err(WorkspaceError::NoSuchStack)
+        }
+    }
+
+    pub fn id_of(&self, target: &String) -> Option<usize> {
+        self.id_map
+            .data()
+            .iter()
+            .find_map(|(idx, id)| if target == id { Some(*idx) } else { None })
+    }
+
+    pub fn set_id(&mut self, idx: usize, id: String) -> InsertResult<usize, String> {
+        self.id_map.insert(idx, id)
+    }
+
+    pub fn remove_id(&mut self, idx: usize) {
+        self.id_map.remove(&idx);
+    }
+
+    pub fn get_id(&self, idx: usize) -> Option<String> {
+        self.id_map.data().get(&idx).cloned()
+    }
+
+    pub fn set_to_class(&mut self, idx: usize, class: String) {
+        self.class_map.insert(idx, class);
+    }
+
+    pub fn remove_from_class(&mut self, idx: usize, class: &String) {
+        self.class_map.remove(&idx, class);
+    }
+
+    pub fn remove_from_all_class(&mut self, idx: usize) {
+        self.class_map.remove_left(&idx);
+    }
+
+    pub fn remove_class(&mut self, class: &String) {
+        self.class_map.remove_right(class);
+    }
+
+    pub fn get_class(&self, class: &String) -> Vec<&usize> {
+        self.class_map.get_right(class)
+    }
+
+    pub fn classes_of(&self, idx: usize) -> Vec<&String> {
+        self.class_map.get_left(&idx)
+    }
+
+    pub fn export(&self) -> (LayerTree, HashMap<usize, String>, HashSet<(usize, String)>) {
+        let mut layer_tree = LayerTree::from(self.stacks[0].as_ref().clone());
+        for stack in &self.stacks[1..] {
+            layer_tree
+                .merge(stack.get_layers())
+                .expect("Layers in workspace has same white idx");
+        }
+        let ids = self.id_map.data().clone();
+        let classes = self.class_map.data().clone();
+        (layer_tree, ids, classes)
+    }
+}
+
+impl From<(Vec<Arc<Stack>>, UniqueValueMap<usize, String>, NtoN<usize, String>)> for Workspace {
+    fn from(value: (Vec<Arc<Stack>>, UniqueValueMap<usize, String>, NtoN<usize, String>)) -> Self {
+        let (stacks, id_map, class_map) = value;
+        Self {
+            stacks, id_map, class_map
+        }
+    }
+}
+
+pub enum WorkspaceError {
+    InvalidDataToLoad,
+    NoSuchStack,
+    NotFillLayer,
+    PluginError(String),
+}
+
+pub type ServerStore = Arc<RwLock<Workspace>>;
+
+pub fn create_server_store() -> ServerStore {
+    Arc::new(RwLock::new(Workspace::new()))
 }
