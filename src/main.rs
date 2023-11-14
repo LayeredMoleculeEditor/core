@@ -9,11 +9,11 @@ use axum::{
     routing::{delete, get, patch, post, put},
     Json, Router,
 };
-use layer::{Layer, LayerTree, Molecule, Stack};
+use data_manager::{Layer, LayerTree, Molecule, Stack};
 
 use utils::{InsertResult, NtoN, UniqueValueMap};
 
-mod layer;
+mod data_manager;
 pub mod serde;
 mod utils;
 
@@ -42,11 +42,11 @@ async fn main() {
         .route("/stacks/:idx", patch(write_to_layer))
         .route("/stacks/:idx", put(overlay_to))
         .route("/atoms/:idx/id/:id", post(set_id))
-        .route("/atoms/:idx/class/:class", post(set_to_group))
-        .route("/atoms/:idx/class/:class", delete(remove_from_group))
-        .route("/atoms/:idx/class", delete(remove_from_all_group))
+        .route("/atoms/:idx/class/:class", post(set_to_class))
+        .route("/atoms/:idx/class/:class", delete(remove_from_class))
+        .route("/atoms/:idx/class", delete(remove_from_all_class))
         .route("/ids/:idx", delete(remove_id))
-        .route("/classes/:class", delete(remove_group))
+        .route("/classes/:class", delete(remove_class))
         .with_state(project);
 
     axum::Server::bind(&"127.0.0.1:10810".parse().unwrap())
@@ -124,7 +124,7 @@ async fn set_id(
     }
 }
 
-async fn set_to_group(
+async fn set_to_class(
     State(store): State<ServerStore>,
     Path(idx): Path<usize>,
     Path(class): Path<String>,
@@ -138,7 +138,7 @@ async fn remove_id(State(store): State<ServerStore>, Path(idx): Path<usize>) -> 
     StatusCode::OK
 }
 
-async fn remove_from_group(
+async fn remove_from_class(
     State(store): State<ServerStore>,
     Path(idx): Path<usize>,
     Path(class): Path<String>,
@@ -147,7 +147,7 @@ async fn remove_from_group(
     StatusCode::OK
 }
 
-async fn remove_from_all_group(
+async fn remove_from_all_class(
     State(store): State<ServerStore>,
     Path(idx): Path<usize>,
 ) -> StatusCode {
@@ -155,7 +155,7 @@ async fn remove_from_all_group(
     StatusCode::OK
 }
 
-async fn remove_group(State(store): State<ServerStore>, Path(class): Path<String>) -> StatusCode {
+async fn remove_class(State(store): State<ServerStore>, Path(class): Path<String>) -> StatusCode {
     store.write().unwrap().class_map.remove_right(&class);
     StatusCode::OK
 }

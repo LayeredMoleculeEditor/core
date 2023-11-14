@@ -3,7 +3,7 @@ use std::sync::Arc;
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::layer::Stack;
+use crate::data_manager::Stack;
 
 pub fn ser_v3_64<S>(value: &Vector3<f64>, s: S) -> Result<S::Ok, S::Error>
 where
