@@ -452,7 +452,6 @@ impl From<(Vec<Arc<Stack>>, UniqueValueMap<usize, String>, NtoN<usize, String>)>
 }
 
 pub enum WorkspaceError {
-    InvalidDataToLoad,
     NoSuchStack,
     NotFillLayer,
     PluginError(String),
