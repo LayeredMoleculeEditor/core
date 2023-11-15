@@ -13,6 +13,7 @@ mod data_manager;
 mod handler;
 mod serde;
 mod utils;
+mod error;
 
 #[derive(Parser, Debug)]
 struct Args {

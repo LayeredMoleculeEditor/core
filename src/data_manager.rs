@@ -1,11 +1,15 @@
 use std::{
     collections::{HashMap, HashSet},
-    io::Write,
-    process::{Command, Stdio},
+    process::Stdio,
     sync::Arc,
 };
 
-use tokio::sync::{Mutex, RwLock};
+use async_recursion::async_recursion;
+use tokio::{
+    io::AsyncWriteExt,
+    process::Command,
+    sync::{Mutex, RwLock},
+};
 
 use lazy_static::lazy_static;
 use nalgebra::{Matrix3, Vector3};
@@ -13,6 +17,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    error::LMECoreError,
     serde::{de_arc_layer, de_m3_64, de_v3_64, ser_arc_layer, ser_m3_64, ser_v3_64},
     utils::{BondGraph, InsertResult, NtoN, UniqueValueMap},
 };
@@ -65,7 +70,7 @@ pub enum Layer {
 }
 
 impl Layer {
-    pub fn read(&self, base: &Molecule) -> Result<Molecule, &'static str> {
+    pub async fn read(&self, base: &Molecule) -> Result<Molecule, LMECoreError> {
         let (mut atom_table, mut bond_table) = base.clone();
         match self {
             Self::Transparent => {}
@@ -116,37 +121,42 @@ impl Layer {
                     .args(args)
                     .stdin(Stdio::piped())
                     .spawn()
-                    .map_err(|_| "Failed to start target program")?;
+                    .map_err(|err| LMECoreError::PluginLayerError(-1, err.to_string()))?;
                 let data_to_send = serde_json::to_string(&(&atom_table, &bond_table))
-                    .map_err(|_| "Failed to stringify base data")?;
+                    .map_err(|err| LMECoreError::PluginLayerError(-2, err.to_string()))?;
                 if let Some(ref mut stdin) = child.stdin {
                     stdin
                         .write_all(&data_to_send.as_bytes())
-                        .map_err(|_| "Failed to write to child stdin")?;
+                        .await
+                        .map_err(|err| LMECoreError::PluginLayerError(-3, err.to_string()))?;
                     let output = child
                         .wait_with_output()
-                        .map_err(|_| "Failed to get data from child stdout.")?;
+                        .await
+                        .map_err(|err| LMECoreError::PluginLayerError(-4, err.to_string()))?;
                     let data = String::from_utf8_lossy(&output.stdout);
                     let (atoms, bonds): Molecule = serde_json::from_str(&data)
-                        .map_err(|_| "Failed to parse data returned from child process")?;
+                        .map_err(|err| LMECoreError::PluginLayerError(-5, err.to_string()))?;
                     atom_table = atoms;
                     bond_table = bonds;
                 } else {
-                    Err("unable to write to child stdin")?;
+                    Err(LMECoreError::PluginLayerError(
+                        -6,
+                        "Unable to get stdin of child process".to_string(),
+                    ))?;
                 }
             }
         };
         Ok((atom_table, bond_table))
     }
 
-    pub fn write(&mut self, patch: &Molecule) -> Result<(), &'static str> {
+    pub fn write(&mut self, patch: &Molecule) -> Result<(), LMECoreError> {
         if let Self::Fill { atoms, bonds } = self {
             let (patch_atoms, patch_bonds) = patch;
             atoms.extend(patch_atoms);
             bonds.extend(patch_bonds);
             Ok(())
         } else {
-            Err("Not a fill layer.")
+            Err(LMECoreError::NotFillLayer)
         }
     }
 }
@@ -170,11 +180,11 @@ impl Default for Stack {
 }
 
 impl Stack {
-    pub fn overlay(base: Option<Arc<Self>>, config: Layer) -> Result<Self, &'static str> {
+    pub async fn overlay(base: Option<Arc<Self>>, config: Layer) -> Result<Self, LMECoreError> {
         let cached = if let Some(base) = base.clone() {
-            config.read(&base.cached)?
+            config.read(&base.cached).await?
         } else {
-            Ok::<Molecule, &'static str>(empty_tables())?
+            Ok(empty_tables())?
         };
         Ok(Self {
             config,
@@ -187,14 +197,14 @@ impl Stack {
         &self.cached
     }
 
-    pub fn write(&mut self, patch: &Molecule) -> Result<(), &'static str> {
+    pub async fn write(&mut self, patch: &Molecule) -> Result<(), LMECoreError> {
         self.config.write(patch)?;
         let base = self
             .base
             .as_ref()
             .map(|layer| &layer.cached)
             .unwrap_or(&EMPTY_TABLES);
-        self.cached = self.config.read(base)?;
+        self.cached = self.config.read(base).await?;
         Ok(())
     }
 
@@ -239,11 +249,19 @@ pub struct LayerTree {
 }
 
 impl LayerTree {
-    pub fn to_stack(&self, base: Option<Arc<Stack>>) -> Result<Vec<Arc<Stack>>, &'static str> {
-        let layer = Arc::new(Stack::overlay(base, self.config.clone())?);
-        let mut stacks = if self.enabled { vec![layer.clone()] } else { vec![] };
+    #[async_recursion]
+    pub async fn to_stack(
+        &self,
+        base: Option<Arc<Stack>>,
+    ) -> Result<Vec<Arc<Stack>>, LMECoreError> {
+        let layer = Arc::new(Stack::overlay(base, self.config.clone()).await?);
+        let mut stacks = if self.enabled {
+            vec![layer.clone()]
+        } else {
+            vec![]
+        };
         for child in &self.children {
-            let mut sub_layers = child.to_stack(Some(layer.clone()))?;
+            let mut sub_layers = child.to_stack(Some(layer.clone())).await?;
             stacks.append(&mut sub_layers);
         }
         Ok(stacks)
@@ -358,32 +376,28 @@ impl Workspace {
         }
     }
 
-    pub fn overlay_to(&mut self, idx: usize, config: Layer) -> Result<(), WorkspaceError> {
+    pub async fn overlay_to(&mut self, idx: usize, config: Layer) -> Result<(), LMECoreError> {
         if let Some(current) = self.get_stack_mut(idx) {
-            match Stack::overlay(Some(current.clone()), config) {
-                Ok(overlayed) => {
-                    *current = Arc::new(overlayed);
-                    Ok(())
-                }
-                Err(err) => Err(WorkspaceError::PluginError(err.to_string())),
-            }
+            let overlayed = Stack::overlay(Some(current.clone()), config).await?;
+            *current = Arc::new(overlayed);
+            Ok(())
         } else {
-            Err(WorkspaceError::NoSuchStack)
+            Err(LMECoreError::NoSuchStack)
         }
     }
 
-    pub fn write_to_layer(&mut self, idx: usize, patch: &Molecule) -> Result<(), WorkspaceError> {
+    pub async fn write_to_layer(
+        &mut self,
+        idx: usize,
+        patch: &Molecule,
+    ) -> Result<(), LMECoreError> {
         if let Some(current) = self.get_stack_mut(idx) {
             let mut updated = current.as_ref().clone();
-            match updated.write(patch) {
-                Ok(_) => {
-                    *current = Arc::new(updated);
-                    Ok(())
-                }
-                Err(err) => Err(WorkspaceError::NotFillLayer),
-            }
+            updated.write(patch).await?;
+            *current = Arc::new(updated);
+            Ok(())
         } else {
-            Err(WorkspaceError::NoSuchStack)
+            Err(LMECoreError::NoSuchStack)
         }
     }
 
@@ -472,12 +486,6 @@ impl
             class_map,
         }
     }
-}
-
-pub enum WorkspaceError {
-    NoSuchStack,
-    NotFillLayer,
-    PluginError(String),
 }
 
 pub type WorkspaceStore = Arc<Mutex<Workspace>>;
