@@ -1,4 +1,4 @@
-pub mod server;
-pub mod workspace;
-pub mod stack;
 pub mod namespace;
+pub mod server;
+pub mod stack;
+pub mod workspace;

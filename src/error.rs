@@ -4,5 +4,5 @@ use serde::Serialize;
 pub enum LMECoreError {
     NotFillLayer,
     PluginLayerError(isize, String),
-    NoSuchStack
+    NoSuchStack,
 }

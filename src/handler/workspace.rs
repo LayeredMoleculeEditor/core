@@ -13,12 +13,12 @@ use crate::data_manager::{LayerTree, ServerStore, WorkspaceStore};
 
 #[derive(Deserialize)]
 pub struct WorkspacePathParam {
-    ws: String
+    ws: String,
 }
 
 pub async fn workspace_middleware<B>(
     State(store): State<ServerStore>,
-    Path(WorkspacePathParam {ws}): Path<WorkspacePathParam>,
+    Path(WorkspacePathParam { ws }): Path<WorkspacePathParam>,
     mut req: Request<B>,
     next: Next<B>,
 ) -> Result<Response, StatusCode> {

@@ -2,18 +2,19 @@ use std::net::SocketAddr;
 
 use axum::{
     middleware,
-    routing::{delete, get, post, patch, put},Router,
+    routing::{delete, get, patch, post, put},
+    Router,
 };
 use clap::Parser;
 use data_manager::create_server_store;
 
-use handler::{server::*, workspace::*, stack::*, namespace::*};
+use handler::{namespace::*, server::*, stack::*, workspace::*};
 
 mod data_manager;
+mod error;
 mod handler;
 mod serde;
 mod utils;
-mod error;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -23,9 +24,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
-    let Args {
-        listen
-    } = Args::parse();
+    let Args { listen } = Args::parse();
 
     let store = create_server_store();
 

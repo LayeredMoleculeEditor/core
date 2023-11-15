@@ -1,4 +1,4 @@
-use std::{sync::Arc, collections::HashSet};
+use std::{collections::HashSet, sync::Arc};
 
 use axum::{extract::Path, http::StatusCode, Extension, Json};
 use serde::Deserialize;
@@ -25,7 +25,15 @@ pub struct AtomNamePathParam {
 }
 
 pub async fn list_ids(Extension(workspace): Extension<WorkspaceStore>) -> Json<HashSet<String>> {
-    Json(workspace.lock().await.list_ids().into_iter().cloned().collect())
+    Json(
+        workspace
+            .lock()
+            .await
+            .list_ids()
+            .into_iter()
+            .cloned()
+            .collect(),
+    )
 }
 
 pub async fn set_id(
@@ -108,9 +116,17 @@ pub async fn id_to_index(
     }
 }
 
-pub async fn list_classes(Extension(workspace): Extension<WorkspaceStore>) -> Json<HashSet<String>> {
+pub async fn list_classes(
+    Extension(workspace): Extension<WorkspaceStore>,
+) -> Json<HashSet<String>> {
     Json(
-        workspace.lock().await.list_classes().into_iter().cloned().collect()
+        workspace
+            .lock()
+            .await
+            .list_classes()
+            .into_iter()
+            .cloned()
+            .collect(),
     )
 }
 

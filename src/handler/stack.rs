@@ -9,7 +9,10 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::{data_manager::{Layer, Molecule, Stack, WorkspaceStore}, error::LMECoreError};
+use crate::{
+    data_manager::{Layer, Molecule, Stack, WorkspaceStore},
+    error::LMECoreError,
+};
 
 #[derive(Deserialize)]
 pub struct StackPathParam {
@@ -40,7 +43,12 @@ pub async fn write_to_layer(
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
     Json(patch): Json<Molecule>,
 ) -> StatusCode {
-    match workspace.lock().await.write_to_layer(stack_id, &patch).await {
+    match workspace
+        .lock()
+        .await
+        .write_to_layer(stack_id, &patch)
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(err) => match err {
             LMECoreError::NotFillLayer => StatusCode::BAD_REQUEST,
@@ -56,13 +64,13 @@ pub async fn overlay_to(
 ) -> (StatusCode, Json<Option<LMECoreError>>) {
     match workspace.lock().await.overlay_to(stack_id, config).await {
         Ok(_) => (StatusCode::OK, Json(None)),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(Some(err)))
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(Some(err))),
     }
 }
 
 pub async fn remove_stack(
     Extension(workspace): Extension<WorkspaceStore>,
-    Path(StackPathParam { stack_id }): Path<StackPathParam>
+    Path(StackPathParam { stack_id }): Path<StackPathParam>,
 ) -> StatusCode {
     workspace.lock().await.remove_stack(stack_id);
     StatusCode::OK
@@ -70,7 +78,7 @@ pub async fn remove_stack(
 
 pub async fn clone_base(
     Extension(workspace): Extension<WorkspaceStore>,
-    Path(StackPathParam { stack_id }): Path<StackPathParam>
+    Path(StackPathParam { stack_id }): Path<StackPathParam>,
 ) -> StatusCode {
     if workspace.lock().await.clone_base(stack_id) {
         StatusCode::OK
