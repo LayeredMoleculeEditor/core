@@ -106,39 +106,35 @@ pub async fn rotation_atoms(
         Path(NamePathParam { name }),
     )
     .await;
-    if indexes.len() != 0 {
-        let center = Vector3::from(center);
-        let axis = Vector3::from(axis);
-        let rotation = Rotation3::from_axis_angle(&Unit::new_normalize(axis), angle);
-        let rotation_matrix = rotation.matrix();
-        let (atoms, _) = stack.read().clone();
-        let atoms = atoms
-            .into_iter()
-            .filter_map(|(idx, atom)| {
-                atom.and_then(|atom| {
-                    if indexes.contains(&idx) {
-                        Some((idx, atom))
-                    } else {
-                        None
-                    }
-                })
+    let center = Vector3::from(center);
+    let axis = Vector3::from(axis);
+    let rotation = Rotation3::from_axis_angle(&Unit::new_normalize(axis), angle);
+    let rotation_matrix = rotation.matrix();
+    let (atoms, _) = stack.read().clone();
+    let atoms = atoms
+        .into_iter()
+        .filter_map(|(idx, atom)| {
+            atom.and_then(|atom| {
+                if indexes.contains(&idx) {
+                    Some((idx, atom))
+                } else {
+                    None
+                }
             })
-            .map(|(idx, atom)| {
-                (
-                    idx,
-                    Some(atom.update_position(|origin| {
-                        ((origin - center).transpose() * rotation_matrix).transpose() + center
-                    })),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        write_to_layer(
-            Extension(workspace),
-            Path(StackPathParam { stack_id }),
-            Json((atoms, BondGraph::new())),
-        )
-        .await
-    } else {
-        StatusCode::OK
-    }
+        })
+        .map(|(idx, atom)| {
+            (
+                idx,
+                Some(atom.update_position(|origin| {
+                    ((origin - center).transpose() * rotation_matrix).transpose() + center
+                })),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    write_to_layer(
+        Extension(workspace),
+        Path(StackPathParam { stack_id }),
+        Json((atoms, BondGraph::new())),
+    )
+    .await
 }
