@@ -49,6 +49,7 @@ async fn main() {
         .route("/", put(overlay_to))
         .route("/", delete(remove_stack))
         .route("/base", post(clone_base))
+        .route("/rotation/class/:name", put(rotation_atoms))
         .route_layer(middleware::from_fn(stack_middleware));
 
     let workspace_rt = Router::new()
