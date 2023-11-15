@@ -8,7 +8,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 
 use crate::{
     data_manager::{create_workspace_store, LayerTree, ServerStore, Workspace},
@@ -30,7 +30,7 @@ pub async fn create_workspace(
                 let class_map = NtoN::from(class_map);
                 store.write().await.insert(
                     ws,
-                    Arc::new(RwLock::new(Workspace::from((stacks, id_map, class_map)))),
+                    Arc::new(Mutex::new(Workspace::from((stacks, id_map, class_map)))),
                 );
                 StatusCode::OK
             } else {

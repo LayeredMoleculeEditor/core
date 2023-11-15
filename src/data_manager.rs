@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Mutex};
 
 use lazy_static::lazy_static;
 use nalgebra::{Matrix3, Vector3};
@@ -359,6 +359,10 @@ impl Workspace {
         self.stacks.push(Arc::new(Stack::default()));
     }
 
+    pub fn remove_stack(&mut self, idx: usize) {
+        self.stacks.remove(idx);
+    }
+
     pub fn overlay_to(&mut self, idx: usize, config: Layer) -> Result<(), WorkspaceError> {
         if let Some(current) = self.get_stack_mut(idx) {
             match Stack::overlay(Some(current.clone()), config) {
@@ -388,7 +392,11 @@ impl Workspace {
         }
     }
 
-    pub fn id_of(&self, target: &String) -> Option<usize> {
+    pub fn list_ids(&self) -> HashSet<&String> {
+        self.id_map.data().values().collect()
+    }
+
+    pub fn id_to_index(&self, target: &String) -> Option<usize> {
         self.id_map
             .data()
             .iter()
@@ -403,7 +411,7 @@ impl Workspace {
         self.id_map.remove(&idx);
     }
 
-    pub fn get_id(&self, idx: usize) -> Option<String> {
+    pub fn index_to_id(&self, idx: usize) -> Option<String> {
         self.id_map.data().get(&idx).cloned()
     }
 
@@ -423,12 +431,16 @@ impl Workspace {
         self.class_map.remove_right(class);
     }
 
-    pub fn get_class(&self, class: &String) -> Vec<&usize> {
+    pub fn class_indexes(&self, class: &String) -> Vec<&usize> {
         self.class_map.get_right(class)
     }
 
-    pub fn classes_of(&self, idx: usize) -> Vec<&String> {
+    pub fn get_classes(&self, idx: usize) -> Vec<&String> {
         self.class_map.get_left(&idx)
+    }
+
+    pub fn list_classes(&self) -> HashSet<&String> {
+        self.class_map.get_rights()
     }
 
     pub fn export(&self) -> (LayerTree, HashMap<usize, String>, HashSet<(usize, String)>) {
@@ -459,10 +471,10 @@ pub enum WorkspaceError {
     PluginError(String),
 }
 
-pub type WorkspaceStore = Arc<RwLock<Workspace>>;
+pub type WorkspaceStore = Arc<Mutex<Workspace>>;
 
 pub fn create_workspace_store() -> WorkspaceStore {
-    Arc::new(RwLock::new(Workspace::new()))
+    Arc::new(Mutex::new(Workspace::new()))
 }
 
 pub type ServerStore = Arc<RwLock<HashMap<String, WorkspaceStore>>>;

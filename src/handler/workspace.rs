@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use axum::{
-    extract::{Path, State, MatchedPath},
+    extract::{Path, State},
     http::{Request, StatusCode},
     middleware::Next,
     response::Response,
@@ -33,14 +33,14 @@ pub async fn workspace_middleware<B>(
 pub async fn export_workspace(
     Extension(workspace): Extension<WorkspaceStore>,
 ) -> Json<(LayerTree, HashMap<usize, String>, HashSet<(usize, String)>)> {
-    Json(workspace.read().await.export())
+    Json(workspace.lock().await.export())
 }
 
 pub async fn read_stacks(Extension(workspace): Extension<WorkspaceStore>) -> Json<Vec<usize>> {
-    Json(workspace.read().await.get_stacks())
+    Json(workspace.lock().await.get_stacks())
 }
 
 pub async fn new_stack(Extension(workspace): Extension<WorkspaceStore>) -> StatusCode {
-    workspace.write().await.new_empty_stack();
+    workspace.lock().await.new_empty_stack();
     StatusCode::OK
 }

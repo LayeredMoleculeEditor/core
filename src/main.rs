@@ -2,11 +2,11 @@
 
 use axum::{
     middleware,
-    routing::{delete, get, post},Router,
+    routing::{delete, get, post, patch, put},Router,
 };
 use data_manager::create_server_store;
 
-use handler::{server::*, workspace::*, stack::{stack_middleware, read_stack}};
+use handler::{server::*, workspace::*, stack::*, namespace::*};
 
 mod data_manager;
 mod handler;
@@ -17,15 +17,34 @@ mod utils;
 async fn main() {
     let store = create_server_store();
 
+    let namespace_rt = Router::new()
+        .route("/id/:name/stack/:stack_id", get(id_to_index))
+        .route("/class/:name/stack/:stack_id", get(class_indexes))
+        .route_layer(middleware::from_fn(stack_middleware))
+        .route("/id", get(list_ids))
+        .route("/id", post(set_id))
+        .route("/id/atom/:atom_idx", delete(remove_id))
+        .route("/id/atom/:atom_idx", get(index_to_id))
+        .route("/class", get(list_classes))
+        .route("/class", post(set_to_class))
+        .route("/class/:name/atom/:atom_idx", delete(remove_from_class))
+        .route("/class/atom/:atom_idx", get(get_classes))
+        .route("/class/atom/:atom_idx", delete(remove_from_all_class))
+        .route("/class/:name", delete(remove_class));
+
     let stack_rt = Router::new()
         .route("/", get(read_stack))
+        .route("/", patch(write_to_layer))
+        .route("/", put(overlay_to))
+        .route("/", delete(remove_stack))
         .route_layer(middleware::from_fn(stack_middleware));
 
     let workspace_rt = Router::new()
         .route("/export", get(export_workspace))
         .route("/stacks", get(read_stacks))
-        .route("/stack", post(new_stack))
-        .nest("/stack/:stack_id", stack_rt)
+        .route("/stacks", post(new_stack))
+        .nest("/stacks/:stack_id", stack_rt)
+        .nest("/namespace", namespace_rt)
         .layer(middleware::from_fn_with_state(
             store.clone(),
             workspace_middleware,
@@ -35,9 +54,6 @@ async fn main() {
 
     let router = Router::new()
         .nest("/workspaces/:ws", workspace_rt)
-        // .route("/stacks/:idx", get(read_stack))
-        // .route("/stacks/:idx", patch(write_to_layer))
-        // .route("/stacks/:idx", put(overlay_to))
         // .route("/atoms/:idx/id/:id", post(set_id))
         // .route("/atoms/:idx/class/:class", post(set_to_class))
         // .route("/atoms/:idx/class/:class", delete(remove_from_class))
@@ -89,7 +105,6 @@ async fn main() {
 //             WorkspaceError::NoSuchStack => StatusCode::NOT_FOUND,
 //             _ => StatusCode::INTERNAL_SERVER_ERROR
 //         }
-
 //     }
 // }
 
