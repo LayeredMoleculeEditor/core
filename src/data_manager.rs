@@ -38,10 +38,7 @@ impl Atom {
     where
         F: Fn(Vector3<f64>) -> Vector3<f64>,
     {
-        Self {
-            element: self.element,
-            position: f(self.position),
-        }
+        Self::new(self.element, f(self.position))
     }
 }
 
