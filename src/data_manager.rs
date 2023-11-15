@@ -2,8 +2,10 @@ use std::{
     collections::{HashMap, HashSet},
     io::Write,
     process::{Command, Stdio},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
+
+use tokio::sync::RwLock;
 
 use lazy_static::lazy_static;
 use nalgebra::{Matrix3, Vector3};
@@ -457,8 +459,14 @@ pub enum WorkspaceError {
     PluginError(String),
 }
 
-pub type ServerStore = Arc<RwLock<Workspace>>;
+pub type WorkspaceStore = Arc<RwLock<Workspace>>;
+
+pub fn create_workspace_store() -> WorkspaceStore {
+    Arc::new(RwLock::new(Workspace::new()))
+}
+
+pub type ServerStore = Arc<RwLock<HashMap<String, WorkspaceStore>>>;
 
 pub fn create_server_store() -> ServerStore {
-    Arc::new(RwLock::new(Workspace::new()))
+    Arc::new(RwLock::new(HashMap::new()))
 }
