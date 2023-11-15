@@ -23,9 +23,7 @@ pub async fn create_workspace(
     if store.read().await.contains_key(&ws) {
         StatusCode::FORBIDDEN
     } else if let Some((layer_tree, id_map, class_map)) = load {
-        if let Ok((root, mut others)) = layer_tree.to_stack(None) {
-            let mut stacks = vec![root];
-            stacks.append(&mut others);
+        if let Ok(stacks) = layer_tree.to_stack(None) {
             if let Ok(id_map) = UniqueValueMap::from_map(id_map) {
                 let class_map = NtoN::from(class_map);
                 store.write().await.insert(

@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
 
 use lazy_static::lazy_static;
 use nalgebra::{Matrix3, Vector3};
@@ -234,59 +234,45 @@ impl Stack {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct LayerTree {
     config: Layer,
-    children: Vec<(Box<LayerTree>, bool)>,
+    enabled: bool,
+    children: Vec<Box<LayerTree>>,
 }
 
 impl LayerTree {
-    pub fn to_stack(
-        &self,
-        base: Option<Arc<Stack>>,
-    ) -> Result<(Arc<Stack>, Vec<Arc<Stack>>), &'static str> {
+    pub fn to_stack(&self, base: Option<Arc<Stack>>) -> Result<Vec<Arc<Stack>>, &'static str> {
         let layer = Arc::new(Stack::overlay(base, self.config.clone())?);
-        let mut children = vec![];
-        for (child, enabled) in &self.children {
-            let (current, mut sub_layers) = child.to_stack(Some(layer.clone()))?;
-            children.append(&mut sub_layers);
-            if *enabled {
-                children.push(current);
-            }
+        let mut stacks = if self.enabled { vec![layer.clone()] } else { vec![] };
+        for child in &self.children {
+            let mut sub_layers = child.to_stack(Some(layer.clone()))?;
+            stacks.append(&mut sub_layers);
         }
-        Ok((layer, children))
+        Ok(stacks)
     }
 
-    pub fn merge(&mut self, mut stack: Vec<Layer>) -> Result<bool, Vec<Layer>> {
-        stack.reverse();
-        let current = stack
+    pub fn merge(&mut self, mut reversed_stack: Vec<Layer>) -> Option<Vec<Layer>> {
+        let root = reversed_stack
             .last()
-            .expect("should never put empty vec in to this function");
-        if current == &self.config {
-            stack.pop();
-            if stack.len() == 0 {
-                Ok(true)
+            .expect("Each stack input should always contains at least 1 element");
+        if root == &self.config {
+            reversed_stack.pop();
+            if reversed_stack.len() == 0 {
+                self.enabled = true;
             } else {
-                let mut stack_in_loop = Some(stack);
-                for (sub_tree, enabled) in self.children.iter_mut() {
-                    if let Some(stack) = stack_in_loop {
-                        match sub_tree.merge(stack) {
-                            Ok(result) => {
-                                *enabled = *enabled || result;
-                                stack_in_loop = None;
-                            }
-                            Err(give_back) => {
-                                stack_in_loop = Some(give_back);
-                            }
-                        }
+                let mut reversed_stack = Some(reversed_stack);
+                for sub_tree in self.children.iter_mut() {
+                    if let Some(to_merge) = reversed_stack {
+                        reversed_stack = sub_tree.merge(to_merge);
                     }
                 }
-                if let Some(stack) = stack_in_loop {
-                    let layer_tree = Self::from(stack);
-                    let enabled = layer_tree.children.len() == 0;
-                    self.children.push((Box::new(layer_tree), enabled))
-                };
-                Ok(false)
+                if let Some(mut reversed_stack) = reversed_stack {
+                    reversed_stack.reverse();
+                    self.children
+                        .push(Box::new(LayerTree::from(reversed_stack)));
+                }
             }
+            None
         } else {
-            Err(stack)
+            Some(reversed_stack)
         }
     }
 }
@@ -300,25 +286,22 @@ impl From<Stack> for LayerTree {
 impl From<Vec<Layer>> for LayerTree {
     fn from(value: Vec<Layer>) -> Self {
         let mut stack = value;
-        let mut layer = (
-            Box::new(Self {
-                config: stack
-                    .pop()
-                    .expect("Each stack created should always contains at least 1 element"),
-                children: vec![],
-            }),
-            true,
-        );
+        let mut layer_tree = Box::new(Self {
+            config: stack
+                .pop()
+                .expect("Each stack input should always contains at least 1 element"),
+            enabled: false,
+            children: vec![],
+        });
         while let Some(config) = stack.pop() {
-            layer = (
-                Box::new(LayerTree {
-                    config,
-                    children: vec![layer],
-                }),
-                false,
-            );
+            layer_tree = Box::new(Self {
+                config,
+                enabled: false,
+                children: vec![layer_tree],
+            })
         }
-        *layer.0
+        layer_tree.enabled = true;
+        *layer_tree
     }
 }
 
@@ -352,7 +335,10 @@ impl Workspace {
     }
 
     pub fn get_stacks(&self) -> Vec<usize> {
-        self.stacks.par_iter().map(|stack| stack.len()).collect::<Vec<_>>()
+        self.stacks
+            .par_iter()
+            .map(|stack| stack.len())
+            .collect::<Vec<_>>()
     }
 
     pub fn new_empty_stack(&mut self) {
@@ -456,11 +442,25 @@ impl Workspace {
     }
 }
 
-impl From<(Vec<Arc<Stack>>, UniqueValueMap<usize, String>, NtoN<usize, String>)> for Workspace {
-    fn from(value: (Vec<Arc<Stack>>, UniqueValueMap<usize, String>, NtoN<usize, String>)) -> Self {
+impl
+    From<(
+        Vec<Arc<Stack>>,
+        UniqueValueMap<usize, String>,
+        NtoN<usize, String>,
+    )> for Workspace
+{
+    fn from(
+        value: (
+            Vec<Arc<Stack>>,
+            UniqueValueMap<usize, String>,
+            NtoN<usize, String>,
+        ),
+    ) -> Self {
         let (stacks, id_map, class_map) = value;
         Self {
-            stacks, id_map, class_map
+            stacks,
+            id_map,
+            class_map,
         }
     }
 }
