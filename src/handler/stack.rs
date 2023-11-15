@@ -110,8 +110,10 @@ pub async fn rotation_atoms(
     let axis = Vector3::from(axis);
     let rotation = Rotation3::from_axis_angle(&Unit::new_normalize(axis), angle);
     let rotation_matrix = rotation.matrix();
-    let (atoms, _) = stack.read().clone();
-    let atoms = atoms
+    let atoms = stack
+        .read()
+        .clone()
+        .0
         .into_iter()
         .filter_map(|(idx, atom)| {
             atom.and_then(|atom| {
@@ -129,6 +131,42 @@ pub async fn rotation_atoms(
                     ((origin - center).transpose() * rotation_matrix).transpose() + center
                 })),
             )
+        })
+        .collect::<HashMap<_, _>>();
+    write_to_layer(
+        Extension(workspace),
+        Path(StackPathParam { stack_id }),
+        Json((atoms, BondGraph::new())),
+    )
+    .await
+}
+
+pub async fn translation_atoms(
+    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(stack): Extension<Arc<Stack>>,
+    Path(StackNamePathParam { stack_id, name }): Path<StackNamePathParam>,
+    Json(vector): Json<[f64; 3]>,
+) -> StatusCode {
+    let (_, Json(indexes)) = class_indexes(
+        Extension(workspace.clone()),
+        Extension(stack.clone()),
+        Path(NamePathParam { name }),
+    )
+    .await;
+    let vector = Vector3::from(vector);
+    let atoms = stack
+        .read()
+        .0
+        .clone()
+        .into_iter()
+        .filter_map(|(idx, atom)| {
+            atom.and_then(|atom| {
+                if indexes.contains(&idx) {
+                    Some((idx, Some(atom.update_position(|origin| origin + vector))))
+                } else {
+                    None
+                }
+            })
         })
         .collect::<HashMap<_, _>>();
     write_to_layer(
