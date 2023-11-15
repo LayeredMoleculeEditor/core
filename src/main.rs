@@ -1,9 +1,10 @@
-
+use std::net::SocketAddr;
 
 use axum::{
     middleware,
     routing::{delete, get, post, patch, put},Router,
 };
+use clap::Parser;
 use data_manager::create_server_store;
 
 use handler::{server::*, workspace::*, stack::*, namespace::*};
@@ -13,8 +14,18 @@ mod handler;
 mod serde;
 mod utils;
 
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(short, long)]
+    listen: SocketAddr,
+}
+
 #[tokio::main]
 async fn main() {
+    let Args {
+        listen
+    } = Args::parse();
+
     let store = create_server_store();
 
     let namespace_rt = Router::new()
@@ -56,7 +67,7 @@ async fn main() {
         .nest("/workspaces/:ws", workspace_rt)
         .with_state(store);
 
-    axum::Server::bind(&"127.0.0.1:10810".parse().unwrap())
+    axum::Server::bind(&listen)
         .serve(router.into_make_service())
         .await
         .unwrap()
