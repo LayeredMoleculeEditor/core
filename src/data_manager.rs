@@ -198,8 +198,8 @@ impl Stack {
         Ok(())
     }
 
-    pub fn clone_base(&self) -> Option<Self> {
-        self.base.as_ref().map(|value| value.as_ref().clone())
+    pub fn clone_base(&self) -> Option<Arc<Self>> {
+        self.base.as_ref().map(|value| value.clone())
     }
 
     pub fn len(&self) -> usize {
@@ -347,6 +347,15 @@ impl Workspace {
 
     pub fn remove_stack(&mut self, idx: usize) {
         self.stacks.remove(idx);
+    }
+
+    pub fn clone_base(&mut self, idx: usize) -> bool {
+        if let Some(stack) = self.get_stack(idx).and_then(|stack| stack.clone_base()) {
+            self.stacks.push(stack);
+            true
+        } else {
+            false
+        }
     }
 
     pub fn overlay_to(&mut self, idx: usize, config: Layer) -> Result<(), WorkspaceError> {

@@ -72,3 +72,14 @@ pub async fn remove_stack(
     workspace.lock().await.remove_stack(stack_id);
     StatusCode::OK
 }
+
+pub async fn clone_base(
+    Extension(workspace): Extension<WorkspaceStore>,
+    Path(StackPathParam { stack_id }): Path<StackPathParam>
+) -> StatusCode {
+    if workspace.lock().await.clone_base(stack_id) {
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
