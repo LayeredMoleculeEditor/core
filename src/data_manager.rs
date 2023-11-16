@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::LMECoreError,
     serde::{de_arc_layer, de_m3_64, de_v3_64, ser_arc_layer, ser_m3_64, ser_v3_64},
-    utils::{BondGraph, InsertResult, NtoN, UniqueValueMap},
+    utils::{BondGraph, InsertResult, NtoN, Pair, UniqueValueMap},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
@@ -40,10 +40,44 @@ impl Atom {
     {
         Self::new(self.element, f(self.position))
     }
+
+    pub fn get_element(&self) -> &usize {
+        &self.element
+    }
+
+    pub fn get_position(&self) -> &Vector3<f64> {
+        &self.position
+    }
 }
 
 type AtomTable = HashMap<usize, Option<Atom>>;
 pub type Molecule = (AtomTable, BondGraph);
+pub type CleanedMolecule = (Vec<Atom>, HashMap<Pair<usize>, f64>);
+
+pub fn clean_molecule(input: Molecule) -> CleanedMolecule {
+    let (atoms, bonds) = input;
+    let mut atoms = atoms
+        .into_iter()
+        .filter_map(|(idx, atom)| atom.map(|atom| (idx, atom)))
+        .collect::<Vec<_>>();
+    atoms.sort_by(|(a, _), (b, _)| a.cmp(b));
+    let idx_map = atoms
+        .iter()
+        .enumerate()
+        .map(|(new_idx, (old_idx, _))| (*old_idx, new_idx))
+        .collect::<HashMap<_, _>>();
+    let atoms = atoms.into_iter().map(|(_, atom)| atom).collect::<Vec<_>>();
+    let bonds = bonds
+        .into_iter()
+        .filter_map(|(pair, bond)| bond.map(|bond| (pair, bond)))
+        .filter_map(|(pair, bond)| {
+            let (a, b): (usize, usize) = pair.into();
+            let (a, b) = idx_map.get(&a).copied().zip(idx_map.get(&b).copied())?;
+            Some((Pair::from((a, b)), bond))
+        })
+        .collect::<HashMap<_, _>>();
+    (atoms, bonds)
+}
 
 pub fn empty_tables() -> Molecule {
     (HashMap::new(), BondGraph::new())
@@ -170,6 +204,15 @@ impl Layer {
             Ok(())
         } else {
             Err(LMECoreError::NotFillLayer)
+        }
+    }
+}
+
+impl Default for Layer {
+    fn default() -> Self {
+        Self::Fill {
+            atoms: HashMap::new(),
+            bonds: BondGraph::new(),
         }
     }
 }

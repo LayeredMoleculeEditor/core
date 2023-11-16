@@ -4,9 +4,10 @@ use std::{
     fmt::Debug,
     hash::Hash,
     iter::Zip,
-    slice::Iter,
+    slice::Iter, ops::Add, vec::IntoIter
 };
 
+use nalgebra::{Vector3, Matrix3, Unit, Rotation3};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,6 +177,13 @@ impl<T: Eq> Pair<T> {
     }
 }
 
+impl<T: Copy + Ord + Add<Output = T>> Add<T> for Pair<T> {
+    type Output = Pair<T>;
+    fn add(self, rhs: T) -> Self::Output {
+        Pair::from((self.0 + rhs, self.1 + rhs))
+    }
+}
+
 impl<T: Ord> From<(T, T)> for Pair<T> {
     fn from((a, b): (T, T)) -> Self {
         Self::from([a, b])
@@ -198,6 +206,13 @@ impl<T: Hash> Hash for Pair<T> {
     }
 }
 
+impl<T> Into<(T, T)> for Pair<T> {
+    fn into(self) -> (T, T) {
+        let Pair(a, b) = self;
+        (a, b)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BondGraph {
     indexes: Vec<Pair<usize>>,
@@ -209,6 +224,12 @@ impl<'a> BondGraph {
         Self {
             indexes: vec![],
             values: vec![],
+        }
+    }
+
+    pub fn offset(&mut self, offset: usize) {
+        for index in self.indexes.iter_mut() {
+            *index = *index + offset;
         }
     }
 
@@ -266,10 +287,36 @@ impl<'a> IntoIterator for &'a BondGraph {
     }
 }
 
+impl IntoIterator for BondGraph {
+    type Item = (Pair<usize>, Option<f64>);
+    type IntoIter =  Zip<IntoIter<Pair<usize>>, IntoIter<Option<f64>>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.indexes.into_iter().zip(self.values.into_iter())
+    }
+}
+
+impl From<HashMap<Pair<usize>, f64>> for BondGraph {
+    fn from(value: HashMap<Pair<usize>, f64>) -> Self {
+        let (indexes, values): (Vec<Pair<usize>>, Vec<f64>) = value.into_iter().unzip();
+        Self {
+            indexes, values: values.into_iter().map(|bond| Some(bond)).collect()
+        }
+    }
+}
+
 #[test]
 fn bond_graph_serde() {
     let mut bg = BondGraph::new();
     bg.insert(Pair(1, 2), Some(1.5));
     bg.insert(Pair(3, 4), Some(1.5));
     println!("{:#?}", serde_json::to_string(&bg));
+}
+
+/// Returns a rotation axis and angle for rotate `a` to `b`
+pub fn vector_align_rotation(a: &Vector3<f64>, b: &Vector3<f64>) -> (Vector3<f64>, f64) {
+    let a = Unit::new_normalize(*a);
+    let b = Unit::new_normalize(*b);
+    let axis = a.cross(&b);
+    let angle = a.dot(&b).acos();
+    (axis, angle)
 }
