@@ -423,12 +423,11 @@ impl Workspace {
         self.stacks.remove(idx);
     }
 
-    pub fn clone_base(&mut self, idx: usize) -> bool {
+    pub fn clone_base(&mut self, idx: usize) -> Result<(), LMECoreError> {
         if let Some(stack) = self.get_stack(idx).and_then(|stack| stack.clone_base()) {
-            self.stacks.push(stack);
-            true
+            Ok(self.stacks.push(stack))
         } else {
-            false
+            Err(LMECoreError::RootLayerError)
         }
     }
 

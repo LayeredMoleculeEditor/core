@@ -5,13 +5,13 @@ use std::{
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
     Json,
 };
 use tokio::sync::Mutex;
 
 use crate::{
     data_manager::{create_workspace_store, LayerTree, ServerStore, Workspace},
+    error::LMECoreError,
     utils::{NtoN, UniqueValueMap},
 };
 
@@ -19,37 +19,31 @@ pub async fn create_workspace(
     State(store): State<ServerStore>,
     Path(ws): Path<String>,
     Json(load): Json<Option<(LayerTree, HashMap<usize, String>, HashSet<(usize, String)>)>>,
-) -> StatusCode {
+) -> Result<(), LMECoreError> {
     if store.read().await.contains_key(&ws) {
-        StatusCode::FORBIDDEN
+        Err(LMECoreError::WorkspaceNameConflict)
     } else if let Some((layer_tree, id_map, class_map)) = load {
-        if let Ok(stacks) = layer_tree.to_stack(None).await {
-            if let Ok(id_map) = UniqueValueMap::from_map(id_map) {
-                let class_map = NtoN::from(class_map);
-                store.write().await.insert(
-                    ws,
-                    Arc::new(Mutex::new(Workspace::from((stacks, id_map, class_map)))),
-                );
-                StatusCode::OK
-            } else {
-                StatusCode::BAD_REQUEST
-            }
-        } else {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
+        let stacks = layer_tree.to_stack(None).await?;
+        let id_map = UniqueValueMap::from_map(id_map).map_err(|_| LMECoreError::IdMapUniqueError)?;
+        let class_map = NtoN::from(class_map);
+        store.write().await.insert(
+            ws,
+            Arc::new(Mutex::new(Workspace::from((stacks, id_map, class_map)))),
+        );
+        Ok(())
     } else {
         store.write().await.insert(ws, create_workspace_store());
-        StatusCode::OK
+        Ok(())
     }
 }
 
 pub async fn remove_workspace(
     State(store): State<ServerStore>,
     Path(ws): Path<String>,
-) -> StatusCode {
+) -> Result<(), LMECoreError> {
     if store.write().await.remove(&ws).is_some() {
-        StatusCode::OK
+        Ok(())
     } else {
-        StatusCode::NOT_FOUND
+        Err(LMECoreError::WorkspaceNotFound)
     }
 }

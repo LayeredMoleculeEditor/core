@@ -52,6 +52,7 @@ async fn main() {
         .route("/rotation/class/:name", put(rotation_atoms))
         .route("/translation/class/:name", put(translation_atoms))
         .route("/atom/:atom_idx/neighbor", get(get_neighbors))
+        .route("/import", put(import_structure))
         .route_layer(middleware::from_fn(stack_middleware));
 
     let workspace_rt = Router::new()

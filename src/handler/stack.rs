@@ -8,13 +8,12 @@ use axum::{
     Extension, Json,
 };
 use nalgebra::{Rotation3, Unit, Vector3};
-use nanoid::nanoid;
 use serde::Deserialize;
 
 use crate::{
-    data_manager::{Atom, CleanedMolecule, Layer, Molecule, Stack, WorkspaceStore},
+    data_manager::{CleanedMolecule, Layer, Molecule, Stack, WorkspaceStore},
     error::LMECoreError,
-    utils::{vector_align_rotation, BondGraph, Pair},
+    utils::BondGraph,
 };
 
 use super::{
@@ -67,49 +66,35 @@ pub async fn write_to_layer(
     Extension(workspace): Extension<WorkspaceStore>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
     Json(patch): Json<Molecule>,
-) -> StatusCode {
-    match workspace
+) -> Result<(), LMECoreError> {
+    workspace
         .lock()
         .await
         .write_to_layer(stack_id, &patch)
         .await
-    {
-        Ok(_) => StatusCode::OK,
-        Err(err) => match err {
-            LMECoreError::NotFillLayer => StatusCode::BAD_REQUEST,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
-        },
-    }
 }
 
 pub async fn overlay_to(
     Extension(workspace): Extension<WorkspaceStore>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
     Json(config): Json<Layer>,
-) -> (StatusCode, Json<Option<LMECoreError>>) {
-    match workspace.lock().await.overlay_to(stack_id, config).await {
-        Ok(_) => (StatusCode::OK, Json(None)),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(Some(err))),
-    }
+) -> Result<(), LMECoreError> {
+    workspace.lock().await.overlay_to(stack_id, config).await
 }
 
 pub async fn remove_stack(
     Extension(workspace): Extension<WorkspaceStore>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
-) -> StatusCode {
+) -> Result<()> {
     workspace.lock().await.remove_stack(stack_id);
-    StatusCode::OK
+    Ok(())
 }
 
 pub async fn clone_base(
     Extension(workspace): Extension<WorkspaceStore>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
-) -> StatusCode {
-    if workspace.lock().await.clone_base(stack_id) {
-        StatusCode::OK
-    } else {
-        StatusCode::NOT_FOUND
-    }
+) -> Result<(), LMECoreError> {
+    workspace.lock().await.clone_base(stack_id)
 }
 
 // Complex level APIs
@@ -118,8 +103,8 @@ pub async fn rotation_atoms(
     Extension(stack): Extension<Arc<Stack>>,
     Path(StackNamePathParam { stack_id, name }): Path<StackNamePathParam>,
     Json((center, axis, angle)): Json<([f64; 3], [f64; 3], f64)>,
-) -> StatusCode {
-    let (_, Json(indexes)) = class_indexes(
+) -> Result<(), LMECoreError> {
+    let Json(indexes) = class_indexes(
         Extension(workspace.clone()),
         Extension(stack.clone()),
         Path(NamePathParam { name }),
@@ -165,8 +150,8 @@ pub async fn translation_atoms(
     Extension(stack): Extension<Arc<Stack>>,
     Path(StackNamePathParam { stack_id, name }): Path<StackNamePathParam>,
     Json(vector): Json<[f64; 3]>,
-) -> StatusCode {
-    let (_, Json(indexes)) = class_indexes(
+) -> Result<(), LMECoreError> {
+    let Json(indexes) = class_indexes(
         Extension(workspace.clone()),
         Extension(stack.clone()),
         Path(NamePathParam { name }),
@@ -201,7 +186,7 @@ pub async fn import_structure(
     Extension(stack): Extension<Arc<Stack>>,
     Path(StackNamePathParam { stack_id, name }): Path<StackNamePathParam>,
     Json((atoms, bonds)): Json<CleanedMolecule>,
-) -> (StatusCode, Json<Option<Vec<usize>>>) {
+) -> Result<Json<Vec<usize>>> {
     let offset = stack.read().0.keys().max().unwrap_or(&0) + 1;
     let atoms_patch = atoms
         .into_iter()
@@ -211,20 +196,14 @@ pub async fn import_structure(
     let mut bonds_patch = BondGraph::from(bonds);
     bonds_patch.offset(offset);
     let atom_idxs = atoms_patch.keys().cloned().collect::<Vec<_>>();
-    let write_result = write_to_layer(
+    write_to_layer(
         Extension(workspace.clone()),
         Path(StackPathParam { stack_id }),
         Json((atoms_patch, bonds_patch)),
     )
-    .await;
-    if write_result.is_success() {
-        (
-            set_to_class(Extension(workspace), Json((atom_idxs.clone(), name))).await,
-            Json(Some(atom_idxs)),
-        )
-    } else {
-        (write_result, Json(None))
-    }
+    .await?;
+    set_to_class(Extension(workspace), Json((atom_idxs.clone(), name))).await?;
+    Ok(Json(atom_idxs))
 }
 
 // #[derive(Deserialize)]

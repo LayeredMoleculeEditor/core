@@ -7,7 +7,7 @@ use std::{
     slice::Iter, ops::Add, vec::IntoIter
 };
 
-use nalgebra::{Vector3, Matrix3, Unit, Rotation3};
+use nalgebra::{Vector3, Unit};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
