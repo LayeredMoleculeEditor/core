@@ -4,12 +4,12 @@ use axum::{
     extract::Path,
     http::{Request, StatusCode},
     middleware::Next,
-    response::Response,
+    response::{Response, Result},
     Extension, Json,
 };
 use nalgebra::{Rotation3, Unit, Vector3};
-use serde::Deserialize;
 use nanoid::nanoid;
+use serde::Deserialize;
 
 use crate::{
     data_manager::{Atom, CleanedMolecule, Layer, Molecule, Stack, WorkspaceStore},
@@ -19,7 +19,7 @@ use crate::{
 
 use super::{
     namespace::{class_indexes, set_to_class},
-    params::{NamePathParam, StackNamePathParam},
+    params::{AtomPathParam, NamePathParam, StackNamePathParam},
 };
 
 #[derive(Deserialize)]
@@ -43,6 +43,24 @@ pub async fn stack_middleware<B>(
 
 pub async fn read_stack(Extension(stack): Extension<Arc<Stack>>) -> Json<Molecule> {
     Json(stack.read().clone())
+}
+
+pub async fn get_neighbors(
+    Extension(stack): Extension<Arc<Stack>>,
+    Path(AtomPathParam { atom_idx }): Path<AtomPathParam>,
+) -> Result<Json<Vec<(usize, f64)>>, LMECoreError> {
+    let (atoms, bonds) = stack.read();
+    if let Some(Some(_)) = atoms.get(&atom_idx) {
+        let neighbors = bonds
+            .into_iter()
+            .filter_map(|(pair, bond)| pair.get_another(&atom_idx).zip(bond.as_ref()))
+            .filter(|(another, _)| atoms.get(another).and_then(|atom| atom.as_ref()).is_some())
+            .map(|(another, bond)| (*another, *bond))
+            .collect::<Vec<_>>();
+        Ok(Json(neighbors))
+    } else {
+        Err(LMECoreError::NoSuchAtom)
+    }
 }
 
 pub async fn write_to_layer(
