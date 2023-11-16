@@ -495,11 +495,11 @@ impl Workspace {
         self.class_map.remove_right(class);
     }
 
-    pub fn class_indexes(&self, class: &String) -> Vec<&usize> {
+    pub fn class_indexes(&self, class: &String) -> HashSet<&usize> {
         self.class_map.get_right(class)
     }
 
-    pub fn get_classes(&self, idx: usize) -> Vec<&String> {
+    pub fn get_classes(&self, idx: usize) -> HashSet<&String> {
         self.class_map.get_left(&idx)
     }
 

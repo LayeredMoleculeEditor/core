@@ -116,14 +116,14 @@ impl<L: Eq + Hash + Clone, R: Eq + Hash + Clone> NtoN<L, R> {
         self.0.iter().map(|(_, r)| r).collect()
     }
 
-    pub fn get_left(&self, left: &L) -> Vec<&R> {
+    pub fn get_left(&self, left: &L) -> HashSet<&R> {
         self.0
             .iter()
             .filter_map(|(l, r)| if l == left { Some(r) } else { None })
             .collect()
     }
 
-    pub fn get_right(&self, right: &R) -> Vec<&L> {
+    pub fn get_right(&self, right: &R) -> HashSet<&L> {
         self.0
             .iter()
             .filter_map(|(l, r)| if r == right { Some(l) } else { None })
