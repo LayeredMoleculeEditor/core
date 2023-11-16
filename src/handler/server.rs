@@ -24,7 +24,8 @@ pub async fn create_workspace(
         Err(LMECoreError::WorkspaceNameConflict)
     } else if let Some((layer_tree, id_map, class_map)) = load {
         let stacks = layer_tree.to_stack(None).await?;
-        let id_map = UniqueValueMap::from_map(id_map).map_err(|_| LMECoreError::IdMapUniqueError)?;
+        let id_map =
+            UniqueValueMap::from_map(id_map).map_err(|_| LMECoreError::IdMapUniqueError)?;
         let class_map = NtoN::from(class_map);
         store.write().await.insert(
             ws,

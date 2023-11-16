@@ -48,11 +48,13 @@ async fn main() {
         .route("/", patch(write_to_layer))
         .route("/", put(overlay_to))
         .route("/", delete(remove_stack))
+        .route("/cleaned", get(read_cleaned))
         .route("/base", post(clone_base))
         .route("/rotation/class/:name", put(rotation_atoms))
         .route("/translation/class/:name", put(translation_atoms))
         .route("/atom/:atom_idx/neighbor", get(get_neighbors))
-        .route("/import", put(import_structure))
+        .route("/import", post(import_structure))
+        .route("/subsitute", post(add_substitute))
         .route_layer(middleware::from_fn(stack_middleware));
 
     let workspace_rt = Router::new()

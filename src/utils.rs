@@ -4,10 +4,12 @@ use std::{
     fmt::Debug,
     hash::Hash,
     iter::Zip,
-    slice::Iter, ops::Add, vec::IntoIter
+    ops::Add,
+    slice::Iter,
+    vec::IntoIter,
 };
 
-use nalgebra::{Vector3, Unit};
+use nalgebra::{Unit, Vector3};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -289,7 +291,7 @@ impl<'a> IntoIterator for &'a BondGraph {
 
 impl IntoIterator for BondGraph {
     type Item = (Pair<usize>, Option<f64>);
-    type IntoIter =  Zip<IntoIter<Pair<usize>>, IntoIter<Option<f64>>>;
+    type IntoIter = Zip<IntoIter<Pair<usize>>, IntoIter<Option<f64>>>;
     fn into_iter(self) -> Self::IntoIter {
         self.indexes.into_iter().zip(self.values.into_iter())
     }
@@ -299,8 +301,16 @@ impl From<HashMap<Pair<usize>, f64>> for BondGraph {
     fn from(value: HashMap<Pair<usize>, f64>) -> Self {
         let (indexes, values): (Vec<Pair<usize>>, Vec<f64>) = value.into_iter().unzip();
         Self {
-            indexes, values: values.into_iter().map(|bond| Some(bond)).collect()
+            indexes,
+            values: values.into_iter().map(|bond| Some(bond)).collect(),
         }
+    }
+}
+
+impl From<HashMap<Pair<usize>, Option<f64>>> for BondGraph {
+    fn from(value: HashMap<Pair<usize>, Option<f64>>) -> Self {
+        let (indexes, values): (Vec<Pair<usize>>, Vec<Option<f64>>) = value.into_iter().unzip();
+        Self { indexes, values }
     }
 }
 

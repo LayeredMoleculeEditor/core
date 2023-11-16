@@ -4,16 +4,17 @@ use axum::{
     extract::Path,
     http::{Request, StatusCode},
     middleware::Next,
-    response::{Response, Result},
+    response::{ErrorResponse, Response, Result},
     Extension, Json,
 };
 use nalgebra::{Rotation3, Unit, Vector3};
+use nanoid::nanoid;
 use serde::Deserialize;
 
 use crate::{
-    data_manager::{CleanedMolecule, Layer, Molecule, Stack, WorkspaceStore},
+    data_manager::{clean_molecule, Atom, CleanedMolecule, Layer, Molecule, Stack, WorkspaceStore},
     error::LMECoreError,
-    utils::BondGraph,
+    utils::{vector_align_rotation, BondGraph, Pair},
 };
 
 use super::{
@@ -42,6 +43,10 @@ pub async fn stack_middleware<B>(
 
 pub async fn read_stack(Extension(stack): Extension<Arc<Stack>>) -> Json<Molecule> {
     Json(stack.read().clone())
+}
+
+pub async fn read_cleaned(Extension(stack): Extension<Arc<Stack>>) -> Json<CleanedMolecule> {
+    Json(clean_molecule(stack.read().clone()))
 }
 
 pub async fn get_neighbors(
@@ -206,76 +211,117 @@ pub async fn import_structure(
     Ok(Json(atom_idxs))
 }
 
-// #[derive(Deserialize)]
-// pub struct AddSubstitute {
-//     atoms: Vec<Atom>,
-//     bond: HashMap<Pair<usize>, f64>,
-//     current: (usize, usize),
-//     target: (usize, usize),
-//     class_name: Option<String>,
-// }
+#[derive(Deserialize)]
+pub struct AddSubstitute {
+    atoms: Vec<Atom>,
+    bond: HashMap<Pair<usize>, f64>,
+    current: (usize, usize),
+    target: (usize, usize),
+    class_name: Option<String>,
+}
 
-// pub async fn add_substitute(
-//     Extension(workspace): Extension<WorkspaceStore>,
-//     Extension(stack): Extension<Arc<Stack>>,
-//     Path(StackPathParam { stack_id }): Path<StackPathParam>,
-//     Json(configuration): Json<AddSubstitute>,
-// ) -> (StatusCode, Json<Option<String>>) {
-//     let atoms = &stack.read().0;
-//     let target_atoms = atoms
-//         .get(&configuration.target.0)
-//         .map(|item| item.as_ref())
-//         .flatten()
-//         .zip(
-//             atoms
-//                 .get(&configuration.target.1)
-//                 .map(|item| item.as_ref())
-//                 .flatten(),
-//         );
+pub async fn add_substitute(
+    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(stack): Extension<Arc<Stack>>,
+    Path(StackPathParam { stack_id }): Path<StackPathParam>,
+    Json(configuration): Json<AddSubstitute>,
+) -> Result<Json<String>> {
+    let atoms = &stack.read().0;
+    let target_atoms = atoms
+        .get(&configuration.target.0)
+        .map(|item| item.as_ref())
+        .flatten()
+        .zip(
+            atoms
+                .get(&configuration.target.1)
+                .map(|item| item.as_ref())
+                .flatten(),
+        );
 
-//     let current_atoms = configuration
-//         .atoms
-//         .get(configuration.current.0)
-//         .zip(configuration.atoms.get(configuration.current.1));
+    let current_atoms = configuration
+        .atoms
+        .get(configuration.current.0)
+        .zip(configuration.atoms.get(configuration.current.1));
 
-//     if let Some(((base_entry, base_center), (sub_entry, sub_center))) =
-//         target_atoms.zip(current_atoms)
-//     {
-//         let base_direction = base_center.get_position() - base_entry.get_position();
-//         let sub_direction = sub_center.get_position() - sub_entry.get_position();
-//         let (axis, angle) = vector_align_rotation(&sub_direction, &base_direction);
-//         let matrix = *Rotation3::from_axis_angle(&Unit::new_normalize(axis), angle).matrix();
-//         let center = *sub_center.get_position();
-//         let translation_vector = base_center.get_position() - sub_center.get_position();
-//         let atoms = configuration
-//             .atoms
-//             .into_iter()
-//             .map(|atom| {
-//                 atom.update_position(|origin| {
-//                     ((origin - center).transpose() * matrix).transpose() + center
-//                 })
-//             })
-//             .map(|atom| atom.update_position(|origin| origin + translation_vector))
-//             .collect::<Vec<_>>();
-//         let temp_class = configuration.class_name.unwrap_or(nanoid!());
-//         let (status, Json(indexes)) = import_structure(
-//             Extension(workspace.clone()),
-//             Extension(stack.clone()),
-//             Path(StackNamePathParam {
-//                 stack_id,
-//                 name: temp_class.clone(),
-//             }),
-//             Json((atoms, configuration.bond)),
-//         )
-//         .await;
-//         if let Some(indexes) = indexes {
+    if let Some(((base_entry, base_center), (sub_entry, sub_center))) =
+        target_atoms.zip(current_atoms)
+    {
+        let base_direction = base_center.get_position() - base_entry.get_position();
+        let sub_direction = sub_center.get_position() - sub_entry.get_position();
+        let (axis, angle) = vector_align_rotation(&sub_direction, &base_direction);
+        let matrix = *Rotation3::from_axis_angle(&Unit::new_normalize(axis), angle).matrix();
+        let center = *sub_center.get_position();
+        let translation_vector = base_center.get_position() - sub_center.get_position();
+        let atoms = configuration
+            .atoms
+            .into_iter()
+            .map(|atom| {
+                atom.update_position(|origin| {
+                    ((origin - center).transpose() * matrix).transpose() + center
+                })
+            })
+            .map(|atom| atom.update_position(|origin| origin + translation_vector))
+            .collect::<Vec<_>>();
+        let temp_class = configuration.class_name.unwrap_or(nanoid!());
+        let Json(indexes) = import_structure(
+            Extension(workspace.clone()),
+            Extension(stack.clone()),
+            Path(StackNamePathParam {
+                stack_id,
+                name: temp_class.clone(),
+            }),
+            Json((atoms, configuration.bond)),
+        )
+        .await?;
+        let to_remove = indexes
+            .get(configuration.current.0)
+            .zip(indexes.get(configuration.current.0));
+        if let Some((entry_idx, center_idx)) = to_remove {
+            let center_atom = stack.read().0.get(center_idx).unwrap().unwrap();
+            let atoms_patch = HashMap::from([
+                (*entry_idx, None),
+                (*center_idx, None),
+                (configuration.target.1, Some(center_atom)),
+            ]);
+            let bonds_to_modify = (&stack.read().1)
+                .into_iter()
+                .filter_map(|(pair, bond)| pair.get_another(center_idx).cloned().zip(bond.clone()))
+                .collect::<Vec<_>>();
+            let mut bonds_patch = bonds_to_modify
+                .iter()
+                .map(|(neighbor, _)| (Pair::from((*center_idx, *neighbor)), None))
+                .collect::<HashMap<_, _>>();
+            let bonds_to_create = bonds_to_modify
+                .into_iter()
+                .map(|(neighbor, bond)| {
+                    (Pair::from((configuration.target.1, neighbor)), Some(bond))
+                })
+                .collect::<HashMap<_, _>>();
+            bonds_patch.extend(bonds_to_create);
+            let bonds_patch = BondGraph::from(bonds_patch);
+            write_to_layer(
+                Extension(workspace.clone()),
+                Path(StackPathParam { stack_id }),
+                Json((atoms_patch, bonds_patch)),
+            )
+            .await?;
+            set_to_class(
+                Extension(workspace),
+                Json((vec![configuration.target.1], temp_class.clone())),
+            )
+            .await?;
 
-//             write_to_layer(Extension(workspace.clone()), Path(StackPathParam { stack_id }), json).await;
-//         } else {
-//             (StatusCode::FORBIDDEN, Json(None))
-//         }
-//     } else {
-//         (StatusCode::NOT_FOUND, Json(None))
-//     }
-//     // (StatusCode::NOT_FOUND, Json(None))
-// }
+            Ok(Json(temp_class))
+        } else {
+            Err(ErrorResponse::from((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Unable to found atoms imported to stack",
+            )))
+        }
+    } else {
+        Err(ErrorResponse::from((
+            StatusCode::NOT_ACCEPTABLE,
+            "Failed to found current or target atoms to replace",
+        )))
+    }
+}

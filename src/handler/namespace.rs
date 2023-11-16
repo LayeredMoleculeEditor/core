@@ -35,9 +35,9 @@ pub async fn set_id(
 pub async fn index_to_id(
     Extension(workspace): Extension<WorkspaceStore>,
     Path(AtomPathParam { atom_idx }): Path<AtomPathParam>,
-) -> Result<String, LMECoreError> {
+) -> Result<Json<String>, LMECoreError> {
     if let Some(id) = workspace.lock().await.index_to_id(atom_idx) {
-        Ok(id)
+        Ok(Json(id))
     } else {
         Err(LMECoreError::NoSuchId)
     }
