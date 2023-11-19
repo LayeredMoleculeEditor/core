@@ -10,6 +10,7 @@ use axum::{
 use nalgebra::{Rotation3, Unit, Vector3};
 use nanoid::nanoid;
 use serde::Deserialize;
+use rayon::prelude::*;
 
 use crate::{
     data_manager::{clean_molecule, Atom, CleanedMolecule, Layer, Molecule, Stack, WorkspaceStore},
@@ -57,6 +58,7 @@ pub async fn get_neighbors(
     if let Some(Some(_)) = atoms.get(&atom_idx) {
         let neighbors = bonds
             .into_iter()
+            .par_bridge()
             .filter_map(|(pair, bond)| pair.get_another(&atom_idx).zip(bond.as_ref()))
             .filter(|(another, _)| atoms.get(another).and_then(|atom| atom.as_ref()).is_some())
             .map(|(another, bond)| (*another, *bond))
@@ -123,7 +125,7 @@ pub async fn rotation_atoms(
         .read()
         .clone()
         .0
-        .into_iter()
+        .into_par_iter()
         .filter_map(|(idx, atom)| {
             atom.and_then(|atom| {
                 if indexes.contains(&idx) {
@@ -167,7 +169,7 @@ pub async fn translation_atoms(
         .read()
         .0
         .clone()
-        .into_iter()
+        .into_par_iter()
         .filter_map(|(idx, atom)| {
             atom.and_then(|atom| {
                 if indexes.contains(&idx) {
@@ -194,7 +196,7 @@ pub async fn import_structure(
 ) -> Result<Json<Vec<usize>>> {
     let offset = stack.read().0.keys().max().unwrap_or(&0) + 1;
     let atoms_patch = atoms
-        .into_iter()
+        .into_par_iter()
         .enumerate()
         .map(|(idx, atom)| (idx + offset, Some(atom)))
         .collect::<HashMap<_, _>>();
@@ -254,7 +256,7 @@ pub async fn add_substitute(
         let translation_vector = base_center.get_position() - sub_center.get_position();
         let atoms = configuration
             .atoms
-            .into_iter()
+            .into_par_iter()
             .map(|atom| {
                 atom.update_position(|origin| {
                     ((origin - center).transpose() * matrix).transpose() + center
@@ -285,14 +287,16 @@ pub async fn add_substitute(
             ]);
             let bonds_to_modify = (&stack.read().1)
                 .into_iter()
+                .par_bridge()
                 .filter_map(|(pair, bond)| pair.get_another(center_idx).cloned().zip(bond.clone()))
                 .collect::<Vec<_>>();
             let mut bonds_patch = bonds_to_modify
                 .iter()
+                .par_bridge()
                 .map(|(neighbor, _)| (Pair::from((*center_idx, *neighbor)), None))
                 .collect::<HashMap<_, _>>();
             let bonds_to_create = bonds_to_modify
-                .into_iter()
+                .into_par_iter()
                 .map(|(neighbor, bond)| {
                     (Pair::from((configuration.target.1, neighbor)), Some(bond))
                 })

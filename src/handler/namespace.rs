@@ -1,6 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use axum::{extract::Path, response::Result, Extension, Json};
+use rayon::prelude::*;
 
 use crate::{
     data_manager::{Stack, WorkspaceStore},
@@ -16,7 +17,7 @@ pub async fn list_ids(Extension(workspace): Extension<WorkspaceStore>) -> Json<H
             .lock()
             .await
             .list_ids()
-            .into_iter()
+            .into_par_iter()
             .cloned()
             .collect(),
     )
@@ -114,7 +115,7 @@ pub async fn list_classes(
             .lock()
             .await
             .list_classes()
-            .into_iter()
+            .into_par_iter()
             .cloned()
             .collect(),
     )
@@ -128,7 +129,7 @@ pub async fn get_classes(
         .lock()
         .await
         .get_classes(atom_idx)
-        .into_iter()
+        .into_par_iter()
         .cloned()
         .collect::<Vec<_>>();
     Json(classes)
@@ -144,7 +145,7 @@ pub async fn class_indexes(
     let indexes = stack
         .read()
         .0
-        .iter()
+        .par_iter()
         .filter(|(idx, atom)| indexes.contains(idx) && atom.is_some())
         .map(|(idx, _)| idx)
         .cloned()

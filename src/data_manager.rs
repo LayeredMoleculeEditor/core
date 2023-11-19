@@ -57,18 +57,19 @@ pub type CleanedMolecule = (Vec<Atom>, HashMap<Pair<usize>, f64>);
 pub fn clean_molecule(input: Molecule) -> CleanedMolecule {
     let (atoms, bonds) = input;
     let mut atoms = atoms
-        .into_iter()
+        .into_par_iter()
         .filter_map(|(idx, atom)| atom.map(|atom| (idx, atom)))
         .collect::<Vec<_>>();
     atoms.sort_by(|(a, _), (b, _)| a.cmp(b));
     let idx_map = atoms
-        .iter()
+        .par_iter()
         .enumerate()
         .map(|(new_idx, (old_idx, _))| (*old_idx, new_idx))
         .collect::<HashMap<_, _>>();
     let atoms = atoms.into_iter().map(|(_, atom)| atom).collect::<Vec<_>>();
     let bonds = bonds
         .into_iter()
+        .par_bridge()
         .filter_map(|(pair, bond)| bond.map(|bond| (pair, bond)))
         .filter_map(|(pair, bond)| {
             let (a, b): (usize, usize) = pair.into();
@@ -463,8 +464,8 @@ impl Workspace {
     pub fn id_to_index(&self, target: &String) -> Option<usize> {
         self.id_map
             .data()
-            .iter()
-            .find_map(|(idx, id)| if target == id { Some(*idx) } else { None })
+            .par_iter()
+            .find_map_first(|(idx, id)| if target == id { Some(*idx) } else { None })
     }
 
     pub fn set_id(&mut self, idx: usize, id: String) -> InsertResult<usize, String> {

@@ -11,6 +11,7 @@ use std::{
 
 use nalgebra::{Unit, Vector3};
 use serde::{Deserialize, Serialize};
+use rayon::prelude::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UniqueValueMap<K: Hash + Eq + Clone, V: Hash + Eq + Clone> {
@@ -236,7 +237,7 @@ impl<'a> BondGraph {
     }
 
     fn position(&self, key: &Pair<usize>) -> Option<usize> {
-        self.indexes.iter().position(|k| k == key)
+        self.indexes.par_iter().position_any(|k| k == key)
     }
 
     pub fn insert(&mut self, key: Pair<usize>, value: Option<f64>) -> Option<Option<f64>> {
@@ -299,10 +300,10 @@ impl IntoIterator for BondGraph {
 
 impl From<HashMap<Pair<usize>, f64>> for BondGraph {
     fn from(value: HashMap<Pair<usize>, f64>) -> Self {
-        let (indexes, values): (Vec<Pair<usize>>, Vec<f64>) = value.into_iter().unzip();
+        let (indexes, values): (Vec<Pair<usize>>, Vec<f64>) = value.into_par_iter().unzip();
         Self {
             indexes,
-            values: values.into_iter().map(|bond| Some(bond)).collect(),
+            values: values.into_par_iter().map(|bond| Some(bond)).collect(),
         }
     }
 }
