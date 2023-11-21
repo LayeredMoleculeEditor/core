@@ -48,6 +48,7 @@ async fn main() {
         .route("/", patch(write_to_layer))
         .route("/", put(overlay_to))
         .route("/", delete(remove_stack))
+        .route("/writable", get(is_writable))
         .route("/cleaned", get(read_cleaned))
         .route("/base", post(clone_base))
         .route("/rotation/class/:name", put(rotation_atoms))

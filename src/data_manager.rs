@@ -237,6 +237,10 @@ impl Default for Stack {
 }
 
 impl Stack {
+    pub fn top(&self) -> &Layer {
+        &self.config
+    }
+
     pub async fn overlay(base: Option<Arc<Self>>, config: Layer) -> Result<Self, LMECoreError> {
         let cached = if let Some(base) = base.clone() {
             config.read(&base.cached).await?

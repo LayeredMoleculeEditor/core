@@ -69,6 +69,16 @@ pub async fn get_neighbors(
     }
 }
 
+pub async fn is_writable(
+    Extension(stack): Extension<Arc<Stack>>
+) -> Json<bool> {
+    if let Layer::Fill {..} = stack.top() {
+        Json(true)
+    } else {
+        Json(false)
+    }
+}
+
 pub async fn write_to_layer(
     Extension(workspace): Extension<WorkspaceStore>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
