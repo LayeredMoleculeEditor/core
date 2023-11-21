@@ -34,9 +34,12 @@ pub async fn stack_middleware<B>(
     mut req: Request<B>,
     next: Next<B>,
 ) -> Result<Response, LMECoreError> {
-    let workspace = workspace.lock().await;
-    let stack = workspace.get_stack(stack_id)?;
-    req.extensions_mut().insert(stack.clone());
+    // unlock the workspace immediately after insert stack to extensions
+    {
+        let workspace = workspace.lock().await;
+        let stack = workspace.get_stack(stack_id)?;
+        req.extensions_mut().insert(stack.clone());
+    }
     Ok(next.run(req).await)
 }
 
@@ -105,7 +108,7 @@ pub async fn remove_stack(
 
 pub async fn clone_stack(
     Extension(workspace): Extension<WorkspaceStore>,
-    Path(StackPathParam { stack_id }): Path<StackPathParam>
+    Path(StackPathParam { stack_id }): Path<StackPathParam>,
 ) -> Result<Json<usize>, LMECoreError> {
     Ok(Json(workspace.lock().await.clone_stack(stack_id)?))
 }
