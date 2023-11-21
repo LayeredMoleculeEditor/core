@@ -9,8 +9,8 @@ use axum::{
 };
 use nalgebra::{Rotation3, Unit, Vector3};
 use nanoid::nanoid;
-use serde::Deserialize;
 use rayon::prelude::*;
+use serde::Deserialize;
 
 use crate::{
     data_manager::{clean_molecule, Atom, CleanedMolecule, Layer, Molecule, Stack, WorkspaceStore},
@@ -33,13 +33,11 @@ pub async fn stack_middleware<B>(
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
     mut req: Request<B>,
     next: Next<B>,
-) -> Result<Response, StatusCode> {
-    if let Some(stack) = workspace.lock().await.get_stack(stack_id) {
-        req.extensions_mut().insert(stack.clone());
-        Ok(next.run(req).await)
-    } else {
-        Err(StatusCode::NOT_FOUND)
-    }
+) -> Result<Response, LMECoreError> {
+    let workspace = workspace.lock().await;
+    let stack = workspace.get_stack(stack_id)?;
+    req.extensions_mut().insert(stack.clone());
+    Ok(next.run(req).await)
 }
 
 pub async fn read_stack(Extension(stack): Extension<Arc<Stack>>) -> Json<Molecule> {
@@ -69,10 +67,8 @@ pub async fn get_neighbors(
     }
 }
 
-pub async fn is_writable(
-    Extension(stack): Extension<Arc<Stack>>
-) -> Json<bool> {
-    if let Layer::Fill {..} = stack.top() {
+pub async fn is_writable(Extension(stack): Extension<Arc<Stack>>) -> Json<bool> {
+    if let Layer::Fill { .. } = stack.top() {
         Json(true)
     } else {
         Json(false)
@@ -107,11 +103,18 @@ pub async fn remove_stack(
     Ok(())
 }
 
+pub async fn clone_stack(
+    Extension(workspace): Extension<WorkspaceStore>,
+    Path(StackPathParam { stack_id }): Path<StackPathParam>
+) -> Result<Json<usize>, LMECoreError> {
+    Ok(Json(workspace.lock().await.clone_stack(stack_id)?))
+}
+
 pub async fn clone_base(
     Extension(workspace): Extension<WorkspaceStore>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
-) -> Result<(), LMECoreError> {
-    workspace.lock().await.clone_base(stack_id)
+) -> Result<Json<usize>, LMECoreError> {
+    Ok(Json(workspace.lock().await.clone_base(stack_id)?))
 }
 
 // Complex level APIs

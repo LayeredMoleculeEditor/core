@@ -405,12 +405,20 @@ impl Workspace {
         }
     }
 
-    pub fn get_stack(&self, idx: usize) -> Option<&Arc<Stack>> {
-        self.stacks.get(idx)
+    pub fn get_stack(&self, idx: usize) -> Result<&Arc<Stack>, LMECoreError> {
+        if let Some(stack) = self.stacks.get(idx) {
+            Ok(stack)
+        } else {
+            Err(LMECoreError::NoSuchStack)
+        }
     }
 
-    fn get_stack_mut(&mut self, idx: usize) -> Option<&mut Arc<Stack>> {
-        self.stacks.get_mut(idx)
+    fn get_stack_mut(&mut self, idx: usize) -> Result<&mut Arc<Stack>, LMECoreError> {
+        if let Some(stack) = self.stacks.get_mut(idx) {
+            Ok(stack)
+        } else {
+            Err(LMECoreError::NoSuchStack)
+        }
     }
 
     pub fn get_stacks(&self) -> Vec<usize> {
@@ -428,22 +436,27 @@ impl Workspace {
         self.stacks.remove(idx);
     }
 
-    pub fn clone_base(&mut self, idx: usize) -> Result<(), LMECoreError> {
-        if let Some(stack) = self.get_stack(idx).and_then(|stack| stack.clone_base()) {
-            Ok(self.stacks.push(stack))
+    pub fn clone_stack(&mut self, idx: usize) -> Result<usize, LMECoreError> {
+        let stack = self.get_stack(idx)?;
+        self.stacks.push(stack.clone());
+        Ok(self.stacks.len() - 1)
+    }
+
+    pub fn clone_base(&mut self, idx: usize) -> Result<usize, LMECoreError> {
+        let stack = self.get_stack(idx)?;
+        if let Some(base) = stack.clone_base() {
+            self.stacks.push(base);
+            Ok(self.stacks.len() - 1)
         } else {
             Err(LMECoreError::RootLayerError)
         }
     }
 
     pub async fn overlay_to(&mut self, idx: usize, config: Layer) -> Result<(), LMECoreError> {
-        if let Some(current) = self.get_stack_mut(idx) {
-            let overlayed = Stack::overlay(Some(current.clone()), config).await?;
-            *current = Arc::new(overlayed);
-            Ok(())
-        } else {
-            Err(LMECoreError::NoSuchStack)
-        }
+        let stack = self.get_stack_mut(idx)?;
+        let overlayed = Stack::overlay(Some(stack.clone()), config).await?;
+        *stack = Arc::new(overlayed);
+        Ok(())
     }
 
     pub async fn write_to_layer(
@@ -451,14 +464,11 @@ impl Workspace {
         idx: usize,
         patch: &Molecule,
     ) -> Result<(), LMECoreError> {
-        if let Some(current) = self.get_stack_mut(idx) {
-            let mut updated = current.as_ref().clone();
-            updated.write(patch).await?;
-            *current = Arc::new(updated);
-            Ok(())
-        } else {
-            Err(LMECoreError::NoSuchStack)
-        }
+        let stack = self.get_stack_mut(idx)?;
+        let mut updated = stack.as_ref().clone();
+        updated.write(patch).await?;
+        *stack = Arc::new(updated);
+        Ok(())
     }
 
     pub fn list_ids(&self) -> HashSet<&String> {
