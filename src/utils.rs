@@ -10,8 +10,8 @@ use std::{
 };
 
 use nalgebra::{Unit, Vector3};
-use serde::{Deserialize, Serialize};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UniqueValueMap<K: Hash + Eq + Clone, V: Hash + Eq + Clone> {
@@ -109,25 +109,27 @@ impl<L: Eq + Hash + Clone, R: Eq + Hash + Clone> NtoN<L, R> {
         &self.0
     }
 
-    pub fn get_lefts(&self) -> HashSet<&L> {
-        self.0.iter().map(|(l, _)| l).collect()
+    pub fn get_lefts(&self) -> HashSet<L> {
+        self.0.iter().map(|(l, _)| l).cloned().collect()
     }
 
-    pub fn get_rights(&self) -> HashSet<&R> {
-        self.0.iter().map(|(_, r)| r).collect()
+    pub fn get_rights(&self) -> HashSet<R> {
+        self.0.iter().map(|(_, r)| r).cloned().collect()
     }
 
-    pub fn get_left(&self, left: &L) -> HashSet<&R> {
+    pub fn get_left(&self, left: &L) -> HashSet<R> {
         self.0
             .iter()
             .filter_map(|(l, r)| if l == left { Some(r) } else { None })
+            .cloned()
             .collect()
     }
 
-    pub fn get_right(&self, right: &R) -> HashSet<&L> {
+    pub fn get_right(&self, right: &R) -> HashSet<L> {
         self.0
             .iter()
             .filter_map(|(l, r)| if r == right { Some(l) } else { None })
+            .cloned()
             .collect()
     }
 

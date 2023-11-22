@@ -4,40 +4,32 @@ use axum::{extract::Path, response::Result, Extension, Json};
 use rayon::prelude::*;
 
 use crate::{
-    data_manager::{Stack, WorkspaceStore},
+    data_manager::{Stack, Workspace},
     error::LMECoreError,
     utils::InsertResult,
 };
 
 use super::params::{AtomNamePathParam, AtomPathParam, NamePathParam};
 
-pub async fn list_ids(Extension(workspace): Extension<WorkspaceStore>) -> Json<HashSet<String>> {
-    Json(
-        workspace
-            .read()
-            .await
-            .list_ids()
-            .into_par_iter()
-            .cloned()
-            .collect(),
-    )
+pub async fn list_ids(Extension(workspace): Extension<Workspace>) -> Json<HashSet<String>> {
+    Json(workspace.list_ids().await)
 }
 
 pub async fn set_id(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Json((idx, id)): Json<(usize, String)>,
 ) -> Result<(), LMECoreError> {
-    match workspace.write().await.set_id(idx, id) {
+    match workspace.set_id(idx, id).await {
         InsertResult::Duplicated(_) => Err(LMECoreError::IdMapUniqueError),
         _ => Ok(()),
     }
 }
 
 pub async fn index_to_id(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Path(AtomPathParam { atom_idx }): Path<AtomPathParam>,
 ) -> Result<Json<String>, LMECoreError> {
-    if let Some(id) = workspace.read().await.index_to_id(atom_idx) {
+    if let Some(id) = workspace.index_to_id(atom_idx).await {
         Ok(Json(id))
     } else {
         Err(LMECoreError::NoSuchId)
@@ -45,54 +37,49 @@ pub async fn index_to_id(
 }
 
 pub async fn remove_id(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Path(AtomPathParam { atom_idx }): Path<AtomPathParam>,
 ) -> Result<()> {
-    workspace.write().await.remove_id(atom_idx);
-    Ok(())
+    Ok(workspace.remove_id(atom_idx).await)
 }
 
 pub async fn set_to_class(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Json((idxs, class)): Json<(Vec<usize>, String)>,
 ) -> Result<()> {
-    let mut workspace = workspace.write().await;
     for idx in idxs {
-        workspace.set_to_class(idx, class.clone());
+        workspace.set_to_class(idx, class.clone()).await;
     }
     Ok(())
 }
 
 pub async fn remove_from_class(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Path(AtomNamePathParam { atom_idx, name }): Path<AtomNamePathParam>,
 ) -> Result<()> {
-    workspace.write().await.remove_from_class(atom_idx, &name);
-    Ok(())
+    Ok(workspace.remove_from_class(atom_idx, &name).await)
 }
 
 pub async fn remove_from_all_class(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Path(AtomPathParam { atom_idx }): Path<AtomPathParam>,
 ) -> Result<()> {
-    workspace.write().await.remove_from_all_class(atom_idx);
-    Ok(())
+    Ok(workspace.remove_from_all_class(atom_idx).await)
 }
 
 pub async fn remove_class(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Path(NamePathParam { name }): Path<NamePathParam>,
 ) -> Result<()> {
-    workspace.write().await.remove_class(&name);
-    Ok(())
+    Ok(workspace.remove_class(&name).await)
 }
 
 pub async fn id_to_index(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Extension(stack): Extension<Arc<Stack>>,
     Path(NamePathParam { name }): Path<NamePathParam>,
 ) -> Result<Json<usize>, LMECoreError> {
-    if let Some(idx) = workspace.read().await.id_to_index(&name) {
+    if let Some(idx) = workspace.id_to_index(&name).await {
         if let Some(atom) = stack.read().0.get(&idx) {
             if let Some(_) = atom {
                 Ok(Json(idx))
@@ -107,41 +94,23 @@ pub async fn id_to_index(
     }
 }
 
-pub async fn list_classes(
-    Extension(workspace): Extension<WorkspaceStore>,
-) -> Json<HashSet<String>> {
-    Json(
-        workspace
-            .read()
-            .await
-            .list_classes()
-            .into_par_iter()
-            .cloned()
-            .collect(),
-    )
+pub async fn list_classes(Extension(workspace): Extension<Workspace>) -> Json<HashSet<String>> {
+    Json(workspace.list_classes().await)
 }
 
 pub async fn get_classes(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Path(AtomPathParam { atom_idx }): Path<AtomPathParam>,
-) -> Json<Vec<String>> {
-    let classes = workspace
-        .read()
-        .await
-        .get_classes(atom_idx)
-        .into_par_iter()
-        .cloned()
-        .collect::<Vec<_>>();
-    Json(classes)
+) -> Json<HashSet<String>> {
+    Json(workspace.get_classes(atom_idx).await)
 }
 
 pub async fn class_indexes(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Extension(stack): Extension<Arc<Stack>>,
     Path(NamePathParam { name }): Path<NamePathParam>,
 ) -> Json<Vec<usize>> {
-    let workspace = workspace.read().await;
-    let indexes = workspace.class_indexes(&name);
+    let indexes = workspace.class_indexes(&name).await;
     let indexes = stack
         .read()
         .0

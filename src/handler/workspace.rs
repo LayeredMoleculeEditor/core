@@ -9,7 +9,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::data_manager::{LayerTree, ServerStore, WorkspaceStore};
+use crate::data_manager::{LayerTree, ServerStore, Workspace};
 
 #[derive(Deserialize)]
 pub struct WorkspacePathParam {
@@ -31,16 +31,16 @@ pub async fn workspace_middleware<B>(
 }
 
 pub async fn export_workspace(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
 ) -> Json<(LayerTree, HashMap<usize, String>, HashSet<(usize, String)>)> {
-    Json(workspace.read().await.export())
+    Json(workspace.export().await)
 }
 
-pub async fn read_stacks(Extension(workspace): Extension<WorkspaceStore>) -> Json<Vec<usize>> {
-    Json(workspace.read().await.get_stacks())
+pub async fn read_stacks(Extension(workspace): Extension<Workspace>) -> Json<Vec<usize>> {
+    Json(workspace.get_stacks().await)
 }
 
-pub async fn new_stack(Extension(workspace): Extension<WorkspaceStore>) -> StatusCode {
-    workspace.write().await.new_empty_stack();
+pub async fn new_stack(Extension(workspace): Extension<Workspace>) -> StatusCode {
+    workspace.new_empty_stack().await;
     StatusCode::OK
 }

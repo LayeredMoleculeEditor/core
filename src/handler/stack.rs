@@ -13,7 +13,7 @@ use rayon::prelude::*;
 use serde::Deserialize;
 
 use crate::{
-    data_manager::{clean_molecule, Atom, CleanedMolecule, Layer, Molecule, Stack, WorkspaceStore},
+    data_manager::{clean_molecule, Atom, CleanedMolecule, Layer, Molecule, Stack, Workspace},
     error::LMECoreError,
     utils::{vector_align_rotation, BondGraph, Pair},
 };
@@ -29,15 +29,14 @@ pub struct StackPathParam {
 }
 
 pub async fn stack_middleware<B>(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
     mut req: Request<B>,
     next: Next<B>,
 ) -> Result<Response, LMECoreError> {
     // unlock the workspace immediately after insert stack to extensions
     {
-        let workspace = workspace.read().await;
-        let stack = workspace.get_stack(stack_id)?;
+        let stack = workspace.get_stack(stack_id).await?;
         req.extensions_mut().insert(stack.clone());
     }
     Ok(next.run(req).await)
@@ -79,50 +78,45 @@ pub async fn is_writable(Extension(stack): Extension<Arc<Stack>>) -> Json<bool> 
 }
 
 pub async fn write_to_layer(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
     Json(patch): Json<Molecule>,
 ) -> Result<(), LMECoreError> {
-    workspace
-        .write()
-        .await
-        .write_to_layer(stack_id, &patch)
-        .await
+    workspace.write_to_layer(stack_id, &patch).await
 }
 
 pub async fn overlay_to(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
     Json(config): Json<Layer>,
 ) -> Result<(), LMECoreError> {
-    workspace.write().await.overlay_to(stack_id, config).await
+    workspace.overlay_to(stack_id, config).await
 }
 
 pub async fn remove_stack(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
 ) -> Result<()> {
-    workspace.write().await.remove_stack(stack_id);
-    Ok(())
+    Ok(workspace.remove_stack(stack_id).await)
 }
 
 pub async fn clone_stack(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
 ) -> Result<Json<usize>, LMECoreError> {
-    Ok(Json(workspace.write().await.clone_stack(stack_id)?))
+    Ok(Json(workspace.clone_stack(stack_id).await?))
 }
 
 pub async fn clone_base(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
 ) -> Result<Json<usize>, LMECoreError> {
-    Ok(Json(workspace.write().await.clone_base(stack_id)?))
+    Ok(Json(workspace.clone_base(stack_id).await?))
 }
 
 // Complex level APIs
 pub async fn rotation_atoms(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Extension(stack): Extension<Arc<Stack>>,
     Path(StackNamePathParam { stack_id, name }): Path<StackNamePathParam>,
     Json((center, axis, angle)): Json<([f64; 3], [f64; 3], f64)>,
@@ -169,7 +163,7 @@ pub async fn rotation_atoms(
 }
 
 pub async fn translation_atoms(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Extension(stack): Extension<Arc<Stack>>,
     Path(StackNamePathParam { stack_id, name }): Path<StackNamePathParam>,
     Json(vector): Json<[f64; 3]>,
@@ -205,7 +199,7 @@ pub async fn translation_atoms(
 }
 
 pub async fn import_structure(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Extension(stack): Extension<Arc<Stack>>,
     Path(StackNamePathParam { stack_id, name }): Path<StackNamePathParam>,
     Json((atoms, bonds)): Json<CleanedMolecule>,
@@ -239,7 +233,7 @@ pub struct AddSubstitute {
 }
 
 pub async fn add_substitute(
-    Extension(workspace): Extension<WorkspaceStore>,
+    Extension(workspace): Extension<Workspace>,
     Extension(stack): Extension<Arc<Stack>>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
     Json(configuration): Json<AddSubstitute>,

@@ -1,16 +1,12 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{HashMap, HashSet};
 
 use axum::{
     extract::{Path, State},
     Json,
 };
-use tokio::sync::RwLock;
 
 use crate::{
-    data_manager::{create_workspace_store, LayerTree, ServerStore, Workspace},
+    data_manager::{LayerTree, ServerStore, Workspace},
     error::LMECoreError,
     utils::{NtoN, UniqueValueMap},
 };
@@ -27,13 +23,13 @@ pub async fn create_workspace(
         let id_map =
             UniqueValueMap::from_map(id_map).map_err(|_| LMECoreError::IdMapUniqueError)?;
         let class_map = NtoN::from(class_map);
-        store.write().await.insert(
-            ws,
-            Arc::new(RwLock::new(Workspace::from((stacks, id_map, class_map)))),
-        );
+        store
+            .write()
+            .await
+            .insert(ws, Workspace::from((stacks, id_map, class_map)));
         Ok(())
     } else {
-        store.write().await.insert(ws, create_workspace_store());
+        store.write().await.insert(ws, Workspace::new());
         Ok(())
     }
 }

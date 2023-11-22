@@ -5,11 +5,7 @@ use std::{
 };
 
 use async_recursion::async_recursion;
-use tokio::{
-    io::AsyncWriteExt,
-    process::Command,
-    sync::RwLock,
-};
+use tokio::{io::AsyncWriteExt, join, process::Command, sync::RwLock};
 
 use lazy_static::lazy_static;
 use nalgebra::{Matrix3, Vector3};
@@ -390,148 +386,157 @@ fn merge_layer() {
     println!("{}", ser.unwrap());
 }
 
+pub fn arc_rwlock<T>(value: T) -> Arc<RwLock<T>> {
+    Arc::new(RwLock::new(value))
+}
+
+#[derive(Clone)]
 pub struct Workspace {
-    stacks: Vec<Arc<Stack>>,
-    id_map: UniqueValueMap<usize, String>,
-    class_map: NtoN<usize, String>,
+    stacks: Arc<RwLock<Vec<Arc<Stack>>>>,
+    id_map: Arc<RwLock<UniqueValueMap<usize, String>>>,
+    class_map: Arc<RwLock<NtoN<usize, String>>>,
 }
 
 impl Workspace {
     pub fn new() -> Self {
         Workspace {
-            stacks: vec![Arc::new(Stack::default())],
-            id_map: UniqueValueMap::new(),
-            class_map: NtoN::new(),
+            stacks: arc_rwlock(vec![Arc::new(Stack::default())]),
+            id_map: arc_rwlock(UniqueValueMap::new()),
+            class_map: arc_rwlock(NtoN::new()),
         }
     }
 
-    pub fn get_stack(&self, idx: usize) -> Result<&Arc<Stack>, LMECoreError> {
-        if let Some(stack) = self.stacks.get(idx) {
-            Ok(stack)
+    pub async fn get_stack(&self, idx: usize) -> Result<Arc<Stack>, LMECoreError> {
+        if let Some(stack) = self.stacks.read().await.get(idx) {
+            Ok(stack.clone())
         } else {
             Err(LMECoreError::NoSuchStack)
         }
     }
 
-    fn get_stack_mut(&mut self, idx: usize) -> Result<&mut Arc<Stack>, LMECoreError> {
-        if let Some(stack) = self.stacks.get_mut(idx) {
-            Ok(stack)
+    async fn update_stack(&self, idx: usize, stack: Arc<Stack>) -> Result<(), LMECoreError> {
+        if let Some(current) = self.stacks.write().await.get_mut(idx) {
+            *current = stack;
+            Ok(())
         } else {
             Err(LMECoreError::NoSuchStack)
         }
     }
 
-    pub fn get_stacks(&self) -> Vec<usize> {
+    pub async fn get_stacks(&self) -> Vec<usize> {
         self.stacks
+            .read()
+            .await
             .par_iter()
             .map(|stack| stack.len())
             .collect::<Vec<_>>()
     }
 
-    pub fn new_empty_stack(&mut self) {
-        self.stacks.push(Arc::new(Stack::default()));
+    pub async fn new_empty_stack(&self) {
+        self.stacks.write().await.push(Arc::new(Stack::default()));
     }
 
-    pub fn remove_stack(&mut self, idx: usize) {
-        self.stacks.remove(idx);
+    pub async fn remove_stack(&self, idx: usize) {
+        self.stacks.write().await.remove(idx);
     }
 
-    pub fn clone_stack(&mut self, idx: usize) -> Result<usize, LMECoreError> {
-        let stack = self.get_stack(idx)?;
-        self.stacks.push(stack.clone());
-        Ok(self.stacks.len() - 1)
+    pub async fn clone_stack(&self, idx: usize) -> Result<usize, LMECoreError> {
+        let stack = self.get_stack(idx).await?;
+        let mut stacks = self.stacks.write().await;
+        stacks.push(stack);
+        Ok(stacks.len() - 1)
     }
 
-    pub fn clone_base(&mut self, idx: usize) -> Result<usize, LMECoreError> {
-        let stack = self.get_stack(idx)?;
+    pub async fn clone_base(&self, idx: usize) -> Result<usize, LMECoreError> {
+        let stack = self.get_stack(idx).await?;
         if let Some(base) = stack.clone_base() {
-            self.stacks.push(base);
-            Ok(self.stacks.len() - 1)
+            let mut stacks = self.stacks.write().await;
+            stacks.push(base);
+            Ok(stacks.len() - 1)
         } else {
             Err(LMECoreError::RootLayerError)
         }
     }
 
-    pub async fn overlay_to(&mut self, idx: usize, config: Layer) -> Result<(), LMECoreError> {
-        let stack = self.get_stack_mut(idx)?;
+    pub async fn overlay_to(&self, idx: usize, config: Layer) -> Result<(), LMECoreError> {
+        let stack = self.get_stack(idx).await?;
         let overlayed = Stack::overlay(Some(stack.clone()), config).await?;
-        *stack = Arc::new(overlayed);
-        Ok(())
+        self.update_stack(idx, Arc::new(overlayed)).await
     }
 
-    pub async fn write_to_layer(
-        &mut self,
-        idx: usize,
-        patch: &Molecule,
-    ) -> Result<(), LMECoreError> {
-        let stack = self.get_stack_mut(idx)?;
+    pub async fn write_to_layer(&self, idx: usize, patch: &Molecule) -> Result<(), LMECoreError> {
+        let stack = self.get_stack(idx).await?;
         let mut updated = stack.as_ref().clone();
         updated.write(patch).await?;
-        *stack = Arc::new(updated);
-        Ok(())
+        self.update_stack(idx, Arc::new(updated)).await
     }
 
-    pub fn list_ids(&self) -> HashSet<&String> {
-        self.id_map.data().values().collect()
+    pub async fn list_ids(&self) -> HashSet<String> {
+        self.id_map.read().await.data().values().cloned().collect()
     }
 
-    pub fn id_to_index(&self, target: &String) -> Option<usize> {
+    pub async fn id_to_index(&self, target: &String) -> Option<usize> {
         self.id_map
+            .read()
+            .await
             .data()
             .par_iter()
             .find_map_first(|(idx, id)| if target == id { Some(*idx) } else { None })
     }
 
-    pub fn set_id(&mut self, idx: usize, id: String) -> InsertResult<usize, String> {
-        self.id_map.insert(idx, id)
+    pub async fn set_id(&self, idx: usize, id: String) -> InsertResult<usize, String> {
+        self.id_map.write().await.insert(idx, id)
     }
 
-    pub fn remove_id(&mut self, idx: usize) {
-        self.id_map.remove(&idx);
+    pub async fn remove_id(&self, idx: usize) {
+        self.id_map.write().await.remove(&idx);
     }
 
-    pub fn index_to_id(&self, idx: usize) -> Option<String> {
-        self.id_map.data().get(&idx).cloned()
+    pub async fn index_to_id(&self, idx: usize) -> Option<String> {
+        self.id_map.read().await.data().get(&idx).cloned()
     }
 
-    pub fn set_to_class(&mut self, idx: usize, class: String) {
-        self.class_map.insert(idx, class);
+    pub async fn set_to_class(&self, idx: usize, class: String) {
+        self.class_map.write().await.insert(idx, class);
     }
 
-    pub fn remove_from_class(&mut self, idx: usize, class: &String) {
-        self.class_map.remove(&idx, class);
+    pub async fn remove_from_class(&self, idx: usize, class: &String) {
+        self.class_map.write().await.remove(&idx, class);
     }
 
-    pub fn remove_from_all_class(&mut self, idx: usize) {
-        self.class_map.remove_left(&idx);
+    pub async fn remove_from_all_class(&self, idx: usize) {
+        self.class_map.write().await.remove_left(&idx);
     }
 
-    pub fn remove_class(&mut self, class: &String) {
-        self.class_map.remove_right(class);
+    pub async fn remove_class(&self, class: &String) {
+        self.class_map.write().await.remove_right(class);
     }
 
-    pub fn class_indexes(&self, class: &String) -> HashSet<&usize> {
-        self.class_map.get_right(class)
+    pub async fn class_indexes(&self, class: &String) -> HashSet<usize> {
+        self.class_map.read().await.get_right(class)
     }
 
-    pub fn get_classes(&self, idx: usize) -> HashSet<&String> {
-        self.class_map.get_left(&idx)
+    pub async fn get_classes(&self, idx: usize) -> HashSet<String> {
+        self.class_map.read().await.get_left(&idx)
     }
 
-    pub fn list_classes(&self) -> HashSet<&String> {
-        self.class_map.get_rights()
+    pub async fn list_classes(&self) -> HashSet<String> {
+        self.class_map.read().await.get_rights()
     }
 
-    pub fn export(&self) -> (LayerTree, HashMap<usize, String>, HashSet<(usize, String)>) {
-        let mut layer_tree = LayerTree::from(self.stacks[0].as_ref().clone());
-        for stack in &self.stacks[1..] {
+    pub async fn export(&self) -> (LayerTree, HashMap<usize, String>, HashSet<(usize, String)>) {
+        let (stacks, ids, classes) = join!(
+            self.stacks.read(),
+            self.id_map.read(),
+            self.class_map.read()
+        );
+        let mut layer_tree = LayerTree::from(stacks[0].as_ref().clone());
+        for stack in &stacks[1..] {
             layer_tree
                 .merge(stack.get_layers())
                 .expect("Layers in workspace has same white idx");
         }
-        let ids = self.id_map.data().clone();
-        let classes = self.class_map.data().clone();
-        (layer_tree, ids, classes)
+        (layer_tree, ids.data().clone(), classes.data().clone())
     }
 }
 
@@ -551,20 +556,14 @@ impl
     ) -> Self {
         let (stacks, id_map, class_map) = value;
         Self {
-            stacks,
-            id_map,
-            class_map,
+            stacks: arc_rwlock(stacks),
+            id_map: arc_rwlock(id_map),
+            class_map: arc_rwlock(class_map),
         }
     }
 }
 
-pub type WorkspaceStore = Arc<RwLock<Workspace>>;
-
-pub fn create_workspace_store() -> WorkspaceStore {
-    Arc::new(RwLock::new(Workspace::new()))
-}
-
-pub type ServerStore = Arc<RwLock<HashMap<String, WorkspaceStore>>>;
+pub type ServerStore = Arc<RwLock<HashMap<String, Workspace>>>;
 
 pub fn create_server_store() -> ServerStore {
     Arc::new(RwLock::new(HashMap::new()))
