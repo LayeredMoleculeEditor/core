@@ -218,7 +218,9 @@ impl<T> Into<(T, T)> for Pair<T> {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BondGraph {
+    #[serde(default)]
     indexes: Vec<Pair<usize>>,
+    #[serde(default)]
     values: Vec<Option<f64>>,
 }
 
