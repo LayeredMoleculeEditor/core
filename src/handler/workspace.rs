@@ -33,14 +33,14 @@ pub async fn workspace_middleware<B>(
 pub async fn export_workspace(
     Extension(workspace): Extension<WorkspaceStore>,
 ) -> Json<(LayerTree, HashMap<usize, String>, HashSet<(usize, String)>)> {
-    Json(workspace.lock().await.export())
+    Json(workspace.read().await.export())
 }
 
 pub async fn read_stacks(Extension(workspace): Extension<WorkspaceStore>) -> Json<Vec<usize>> {
-    Json(workspace.lock().await.get_stacks())
+    Json(workspace.read().await.get_stacks())
 }
 
 pub async fn new_stack(Extension(workspace): Extension<WorkspaceStore>) -> StatusCode {
-    workspace.lock().await.new_empty_stack();
+    workspace.write().await.new_empty_stack();
     StatusCode::OK
 }

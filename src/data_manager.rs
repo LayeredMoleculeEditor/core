@@ -8,7 +8,7 @@ use async_recursion::async_recursion;
 use tokio::{
     io::AsyncWriteExt,
     process::Command,
-    sync::{Mutex, RwLock},
+    sync::RwLock,
 };
 
 use lazy_static::lazy_static;
@@ -558,10 +558,10 @@ impl
     }
 }
 
-pub type WorkspaceStore = Arc<Mutex<Workspace>>;
+pub type WorkspaceStore = Arc<RwLock<Workspace>>;
 
 pub fn create_workspace_store() -> WorkspaceStore {
-    Arc::new(Mutex::new(Workspace::new()))
+    Arc::new(RwLock::new(Workspace::new()))
 }
 
 pub type ServerStore = Arc<RwLock<HashMap<String, WorkspaceStore>>>;

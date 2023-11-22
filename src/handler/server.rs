@@ -7,7 +7,7 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use crate::{
     data_manager::{create_workspace_store, LayerTree, ServerStore, Workspace},
@@ -29,7 +29,7 @@ pub async fn create_workspace(
         let class_map = NtoN::from(class_map);
         store.write().await.insert(
             ws,
-            Arc::new(Mutex::new(Workspace::from((stacks, id_map, class_map)))),
+            Arc::new(RwLock::new(Workspace::from((stacks, id_map, class_map)))),
         );
         Ok(())
     } else {

@@ -36,7 +36,7 @@ pub async fn stack_middleware<B>(
 ) -> Result<Response, LMECoreError> {
     // unlock the workspace immediately after insert stack to extensions
     {
-        let workspace = workspace.lock().await;
+        let workspace = workspace.read().await;
         let stack = workspace.get_stack(stack_id)?;
         req.extensions_mut().insert(stack.clone());
     }
@@ -84,7 +84,7 @@ pub async fn write_to_layer(
     Json(patch): Json<Molecule>,
 ) -> Result<(), LMECoreError> {
     workspace
-        .lock()
+        .write()
         .await
         .write_to_layer(stack_id, &patch)
         .await
@@ -95,14 +95,14 @@ pub async fn overlay_to(
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
     Json(config): Json<Layer>,
 ) -> Result<(), LMECoreError> {
-    workspace.lock().await.overlay_to(stack_id, config).await
+    workspace.write().await.overlay_to(stack_id, config).await
 }
 
 pub async fn remove_stack(
     Extension(workspace): Extension<WorkspaceStore>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
 ) -> Result<()> {
-    workspace.lock().await.remove_stack(stack_id);
+    workspace.write().await.remove_stack(stack_id);
     Ok(())
 }
 
@@ -110,14 +110,14 @@ pub async fn clone_stack(
     Extension(workspace): Extension<WorkspaceStore>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
 ) -> Result<Json<usize>, LMECoreError> {
-    Ok(Json(workspace.lock().await.clone_stack(stack_id)?))
+    Ok(Json(workspace.write().await.clone_stack(stack_id)?))
 }
 
 pub async fn clone_base(
     Extension(workspace): Extension<WorkspaceStore>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
 ) -> Result<Json<usize>, LMECoreError> {
-    Ok(Json(workspace.lock().await.clone_base(stack_id)?))
+    Ok(Json(workspace.write().await.clone_base(stack_id)?))
 }
 
 // Complex level APIs
