@@ -48,7 +48,7 @@ impl Atom {
 
 type AtomTable = HashMap<usize, Option<Atom>>;
 pub type Molecule = (AtomTable, BondGraph);
-pub type CleanedMolecule = (Vec<Atom>, HashMap<Pair<usize>, f64>);
+pub type CleanedMolecule = (Vec<Atom>, Vec<Pair<usize>>, Vec<f64>);
 
 pub fn clean_molecule(input: Molecule) -> CleanedMolecule {
     let (atoms, bonds) = input;
@@ -63,7 +63,7 @@ pub fn clean_molecule(input: Molecule) -> CleanedMolecule {
         .map(|(new_idx, (old_idx, _))| (*old_idx, new_idx))
         .collect::<HashMap<_, _>>();
     let atoms = atoms.into_iter().map(|(_, atom)| atom).collect::<Vec<_>>();
-    let bonds = bonds
+    let (bonds_idxs, bonds_values): (Vec<Pair<usize>>, Vec<f64>) = bonds
         .into_iter()
         .par_bridge()
         .filter_map(|(pair, bond)| bond.map(|bond| (pair, bond)))
@@ -72,8 +72,9 @@ pub fn clean_molecule(input: Molecule) -> CleanedMolecule {
             let (a, b) = idx_map.get(&a).copied().zip(idx_map.get(&b).copied())?;
             Some((Pair::from((a, b)), bond))
         })
-        .collect::<HashMap<_, _>>();
-    (atoms, bonds)
+        .unzip();
+        // .collect::<HashMap<_, _>>();
+    (atoms, bonds_idxs, bonds_values)
 }
 
 pub fn empty_tables() -> Molecule {

@@ -202,8 +202,12 @@ pub async fn import_structure(
     Extension(workspace): Extension<Workspace>,
     Extension(stack): Extension<Arc<Stack>>,
     Path(StackNamePathParam { stack_id, name }): Path<StackNamePathParam>,
-    Json((atoms, bonds)): Json<CleanedMolecule>,
+    Json((atoms, bonds_idxs, bonds_values)): Json<CleanedMolecule>,
 ) -> Result<Json<Vec<usize>>> {
+    let bonds = bonds_idxs
+        .into_iter()
+        .zip(bonds_values.into_iter())
+        .collect::<HashMap<_, _>>();
     let offset = stack.read().0.keys().max().unwrap_or(&0) + 1;
     let atoms_patch = atoms
         .into_par_iter()
@@ -212,7 +216,8 @@ pub async fn import_structure(
         .collect::<HashMap<_, _>>();
     let mut bonds_patch = BondGraph::from(bonds);
     bonds_patch.offset(offset);
-    let atom_idxs = atoms_patch.keys().cloned().collect::<Vec<_>>();
+    let mut atom_idxs = atoms_patch.keys().cloned().collect::<Vec<_>>();
+    atom_idxs.sort();
     write_to_layer(
         Extension(workspace.clone()),
         Path(StackPathParam { stack_id }),
@@ -223,10 +228,11 @@ pub async fn import_structure(
     Ok(Json(atom_idxs))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct AddSubstitute {
     atoms: Vec<Atom>,
-    bond: HashMap<Pair<usize>, f64>,
+    bonds_idxs: Vec<(usize, usize)>,
+    bonds_values: Vec<f64>,
     current: (usize, usize),
     target: (usize, usize),
     class_name: Option<String>,
@@ -282,12 +288,22 @@ pub async fn add_substitute(
                 stack_id,
                 name: temp_class.clone(),
             }),
-            Json((atoms, configuration.bond)),
+            Json((
+                atoms,
+                configuration
+                    .bonds_idxs
+                    .into_iter()
+                    .map(|pair| Pair::from(pair))
+                    .collect(),
+                configuration.bonds_values,
+            )),
         )
         .await?;
         let to_remove = indexes
             .get(configuration.current.0)
-            .zip(indexes.get(configuration.current.0));
+            .zip(indexes.get(configuration.current.1));
+        // stack updated, use new stack.
+        let stack = workspace.get_stack(stack_id).await?;
         if let Some((entry_idx, center_idx)) = to_remove {
             let center_atom = stack.read().0.get(center_idx).unwrap().unwrap();
             let atoms_patch = HashMap::from([
