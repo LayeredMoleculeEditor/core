@@ -331,7 +331,7 @@ fn bond_graph_serde() {
 pub fn vector_align_rotation(a: &Vector3<f64>, b: &Vector3<f64>) -> (Vector3<f64>, f64) {
     let a = Unit::new_normalize(*a);
     let b = Unit::new_normalize(*b);
-    let axis = a.cross(&b);
+    let axis = b.cross(&a);
     let angle = a.dot(&b).acos();
     (axis, angle)
 }
