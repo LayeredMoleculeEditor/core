@@ -46,7 +46,7 @@ async fn main() {
     let stack_rt = Router::new()
         .route("/", get(read_stack))
         .route("/", patch(write_to_layer))
-        .route("/", put(overlay_to))
+        // .route("/", put(overlay_to))
         .route("/", delete(remove_stack))
         .route("/writable", get(is_writable))
         .route("/cleaned", get(read_cleaned))
@@ -63,6 +63,7 @@ async fn main() {
         .route("/export", get(export_workspace))
         .route("/stacks", get(read_stacks))
         .route("/stacks", post(new_stack))
+        .route("/stacks/overlay_to", put(overlay_to))
         .nest("/stacks/:stack_id", stack_rt)
         .nest("/namespace", namespace_rt)
         .layer(middleware::from_fn_with_state(

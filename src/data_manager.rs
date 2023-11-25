@@ -7,6 +7,7 @@ use std::{
 use async_recursion::async_recursion;
 use tokio::{io::AsyncWriteExt, join, process::Command, sync::RwLock};
 
+use futures::future::join_all;
 use lazy_static::lazy_static;
 use nalgebra::{Matrix3, Vector3};
 use rayon::prelude::*;
@@ -73,7 +74,7 @@ pub fn clean_molecule(input: Molecule) -> CleanedMolecule {
             Some((Pair::from((a, b)), bond))
         })
         .unzip();
-        // .collect::<HashMap<_, _>>();
+    // .collect::<HashMap<_, _>>();
     (atoms, bonds_idxs, bonds_values)
 }
 
@@ -415,6 +416,34 @@ impl Workspace {
         }
     }
 
+    async fn update_stacks(
+        &self,
+        patches: &HashMap<usize, Arc<Stack>>,
+    ) -> Result<(), LMECoreError> {
+        let existed_stacks_amount = self.stacks.read().await.len();
+        if let Some(_) = patches.keys().position(|idx| existed_stacks_amount <= *idx) {
+            Err(LMECoreError::NoSuchStack)
+        } else {
+            let mut stacks = self.stacks.write().await;
+            for (idx, stack) in patches {
+                *stacks.get_mut(*idx).unwrap() = stack.clone();
+            }
+            Ok(())
+        }
+    }
+
+    async fn get_stacks(&self, indexes: &Vec<usize>) -> Result<Vec<Arc<Stack>>, LMECoreError> {
+        let existed_stacks = self.stacks.read().await;
+        if let Some(_) = indexes.iter().position(|idx| existed_stacks.len() <= *idx) {
+            Err(LMECoreError::NoSuchStack)
+        } else {
+            Ok(indexes
+                .iter()
+                .map(|idx| existed_stacks.get(*idx).unwrap().clone())
+                .collect())
+        }
+    }
+
     async fn update_stack(&self, idx: usize, stack: Arc<Stack>) -> Result<(), LMECoreError> {
         if let Some(current) = self.stacks.write().await.get_mut(idx) {
             *current = stack;
@@ -424,7 +453,7 @@ impl Workspace {
         }
     }
 
-    pub async fn get_stacks(&self) -> Vec<usize> {
+    pub async fn get_all_stack(&self) -> Vec<usize> {
         self.stacks
             .read()
             .await
@@ -441,28 +470,50 @@ impl Workspace {
         self.stacks.write().await.remove(idx);
     }
 
-    pub async fn clone_stack(&self, idx: usize) -> Result<usize, LMECoreError> {
+    pub async fn clone_stack(&self, idx: usize, amount: usize) -> Result<usize, LMECoreError> {
         let stack = self.get_stack(idx).await?;
         let mut stacks = self.stacks.write().await;
-        stacks.push(stack);
+        for _ in 0..amount {
+            stacks.push(stack.clone());
+        }
         Ok(stacks.len() - 1)
     }
 
-    pub async fn clone_base(&self, idx: usize) -> Result<usize, LMECoreError> {
+    pub async fn clone_base(&self, idx: usize, amount: usize) -> Result<usize, LMECoreError> {
         let stack = self.get_stack(idx).await?;
         if let Some(base) = stack.clone_base() {
             let mut stacks = self.stacks.write().await;
-            stacks.push(base);
+            for _ in 0..amount {
+                stacks.push(base.clone());
+            }
             Ok(stacks.len() - 1)
         } else {
             Err(LMECoreError::RootLayerError)
         }
     }
 
-    pub async fn overlay_to(&self, idx: usize, config: Layer) -> Result<(), LMECoreError> {
-        let stack = self.get_stack(idx).await?;
-        let overlayed = Stack::overlay(Some(stack.clone()), config).await?;
-        self.update_stack(idx, Arc::new(overlayed)).await
+    pub async fn overlay_to(
+        &self,
+        indexes: &Vec<usize>,
+        config: Layer,
+    ) -> Result<(), LMECoreError> {
+        let stacks = self.get_stacks(indexes).await?;
+        let overlays = stacks
+            .into_iter()
+            .map(|stack| Stack::overlay(Some(stack), config.clone()))
+            .collect::<Vec<_>>();
+        let overlayeds = join_all(overlays)
+            .await
+            .into_iter()
+            .map(|value| value.map(|value| Arc::new(value)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let patches = indexes
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(idx, stack_idx)| (stack_idx, overlayeds.get(idx).unwrap().clone()))
+            .collect::<HashMap<_, _>>();
+        self.update_stacks(&patches).await
     }
 
     pub async fn write_to_layer(&self, idx: usize, patch: &Molecule) -> Result<(), LMECoreError> {

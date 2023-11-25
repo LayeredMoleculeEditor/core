@@ -22,3 +22,4 @@ nanoid = "0.4.0"
 serde_yaml = "0.9.27"
 clap = { version = "4.4.8", features = ["derive"] }
 async-recursion = "1.0.5"
+futures = "0.3.29"

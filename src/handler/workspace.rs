@@ -37,7 +37,7 @@ pub async fn export_workspace(
 }
 
 pub async fn read_stacks(Extension(workspace): Extension<Workspace>) -> Json<Vec<usize>> {
-    Json(workspace.get_stacks().await)
+    Json(workspace.get_all_stack().await)
 }
 
 pub async fn new_stack(Extension(workspace): Extension<Workspace>) -> StatusCode {

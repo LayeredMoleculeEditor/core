@@ -87,10 +87,9 @@ pub async fn write_to_layer(
 
 pub async fn overlay_to(
     Extension(workspace): Extension<Workspace>,
-    Path(StackPathParam { stack_id }): Path<StackPathParam>,
-    Json(config): Json<Layer>,
+    Json((config, stacks)): Json<(Layer, Vec<usize>)>,
 ) -> Result<(), LMECoreError> {
-    workspace.overlay_to(stack_id, config).await
+    workspace.overlay_to(&stacks, config).await
 }
 
 pub async fn remove_stack(
@@ -100,18 +99,25 @@ pub async fn remove_stack(
     Ok(workspace.remove_stack(stack_id).await)
 }
 
+#[derive(Deserialize)]
+pub struct CloneStackOptions {
+    amount: usize,
+}
+
 pub async fn clone_stack(
     Extension(workspace): Extension<Workspace>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
+    Json(CloneStackOptions { amount }): Json<CloneStackOptions>,
 ) -> Result<Json<usize>, LMECoreError> {
-    Ok(Json(workspace.clone_stack(stack_id).await?))
+    Ok(Json(workspace.clone_stack(stack_id, amount).await?))
 }
 
 pub async fn clone_base(
     Extension(workspace): Extension<Workspace>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
+    Json(CloneStackOptions { amount }): Json<CloneStackOptions>,
 ) -> Result<Json<usize>, LMECoreError> {
-    Ok(Json(workspace.clone_base(stack_id).await?))
+    Ok(Json(workspace.clone_base(stack_id, amount).await?))
 }
 
 // Complex level APIs
