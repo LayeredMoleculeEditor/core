@@ -303,7 +303,7 @@ impl Stack {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct LayerTree {
     config: Layer,
-    enabled: bool,
+    indexes: Vec<usize>,
     children: Vec<Box<LayerTree>>,
 }
 
@@ -312,39 +312,39 @@ impl LayerTree {
     pub async fn to_stack(
         &self,
         base: Option<Arc<Stack>>,
-    ) -> Result<Vec<Arc<Stack>>, LMECoreError> {
+    ) -> Result<HashMap<usize, Arc<Stack>>, LMECoreError> {
         let layer = Arc::new(Stack::overlay(base, self.config.clone()).await?);
-        let mut stacks = if self.enabled {
-            vec![layer.clone()]
-        } else {
-            vec![]
-        };
+        let mut stacks = self
+            .indexes
+            .iter()
+            .map(|idx| (*idx, layer.clone()))
+            .collect::<HashMap<_, _>>();
         for child in &self.children {
-            let mut sub_layers = child.to_stack(Some(layer.clone())).await?;
-            stacks.append(&mut sub_layers);
+            let sub_layers = child.to_stack(Some(layer.clone())).await?;
+            stacks.extend(sub_layers);
         }
         Ok(stacks)
     }
 
-    pub fn merge(&mut self, mut reversed_stack: Vec<Layer>) -> Option<Vec<Layer>> {
+    pub fn merge(&mut self, mut reversed_stack: Vec<Layer>, index: usize) -> Option<Vec<Layer>> {
         let root = reversed_stack
             .last()
             .expect("Each stack input should always contains at least 1 element");
         if root == &self.config {
             reversed_stack.pop();
             if reversed_stack.len() == 0 {
-                self.enabled = true;
+                self.indexes.push(index);
             } else {
                 let mut reversed_stack = Some(reversed_stack);
                 for sub_tree in self.children.iter_mut() {
                     if let Some(to_merge) = reversed_stack {
-                        reversed_stack = sub_tree.merge(to_merge);
+                        reversed_stack = sub_tree.merge(to_merge, index);
                     }
                 }
                 if let Some(mut reversed_stack) = reversed_stack {
                     reversed_stack.reverse();
                     self.children
-                        .push(Box::new(LayerTree::from(reversed_stack)));
+                        .push(Box::new(LayerTree::from((reversed_stack, index))));
                 }
             }
             None
@@ -354,30 +354,29 @@ impl LayerTree {
     }
 }
 
-impl From<Stack> for LayerTree {
-    fn from(value: Stack) -> Self {
-        Self::from(value.get_layers())
+impl From<(Stack, usize)> for LayerTree {
+    fn from((stack, index): (Stack, usize)) -> Self {
+        Self::from((stack.get_layers(), index))
     }
 }
 
-impl From<Vec<Layer>> for LayerTree {
-    fn from(value: Vec<Layer>) -> Self {
-        let mut stack = value;
+impl From<(Vec<Layer>, usize)> for LayerTree {
+    fn from((layers, index): (Vec<Layer>, usize)) -> Self {
+        let mut stack = layers;
         let mut layer_tree = Box::new(Self {
             config: stack
                 .pop()
                 .expect("Each stack input should always contains at least 1 element"),
-            enabled: false,
+            indexes: vec![index],
             children: vec![],
         });
         while let Some(config) = stack.pop() {
             layer_tree = Box::new(Self {
                 config,
-                enabled: false,
+                indexes: vec![],
                 children: vec![layer_tree],
             })
         }
-        layer_tree.enabled = true;
         *layer_tree
     }
 }
@@ -582,11 +581,13 @@ impl Workspace {
             self.id_map.read(),
             self.class_map.read()
         );
-        let mut layer_tree = LayerTree::from(stacks[0].as_ref().clone());
-        for stack in &stacks[1..] {
-            layer_tree
-                .merge(stack.get_layers())
-                .expect("Layers in workspace has same white idx");
+        let mut layer_tree = LayerTree::from((stacks[0].as_ref().clone(), 0));
+        for (idx, stack) in stacks[1..].to_vec().iter().enumerate() {
+            let mut reversed_stack = stack.get_layers();
+            reversed_stack.reverse();
+            if layer_tree.merge(reversed_stack, idx + 1).is_some() {
+                panic!("All stacks should based on same Transparent Layer")
+            }
         }
         (layer_tree, ids.data().clone(), classes.data().clone())
     }

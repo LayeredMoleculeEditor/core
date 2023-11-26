@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use axum::{
     extract::{Path, State},
@@ -19,7 +22,16 @@ pub async fn create_workspace(
     if store.read().await.contains_key(&ws) {
         Err(LMECoreError::WorkspaceNameConflict)
     } else if let Some((layer_tree, id_map, class_map)) = load {
-        let stacks = layer_tree.to_stack(None).await?;
+        let mut stacks = layer_tree
+            .to_stack(None)
+            .await?
+            .into_iter()
+            .collect::<Vec<_>>();
+        stacks.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let stacks = stacks
+            .into_iter()
+            .map(|(_, stack)| stack)
+            .collect::<Vec<_>>();
         let id_map =
             UniqueValueMap::from_map(id_map).map_err(|_| LMECoreError::IdMapUniqueError)?;
         let class_map = NtoN::from(class_map);
