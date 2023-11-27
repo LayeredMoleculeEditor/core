@@ -162,7 +162,7 @@ impl<K, V> Into<HashSet<(K, V)>> for NtoN<K, V> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Pair<T>(T, T);
 
 impl<T: Eq> Pair<T> {

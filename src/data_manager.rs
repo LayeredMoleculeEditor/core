@@ -64,6 +64,9 @@ pub fn clean_molecule(input: Molecule) -> CleanedMolecule {
         .map(|(new_idx, (old_idx, _))| (*old_idx, new_idx))
         .collect::<HashMap<_, _>>();
     let atoms = atoms.into_iter().map(|(_, atom)| atom).collect::<Vec<_>>();
+    let mut bonds = bonds.into_iter()
+        .collect::<Vec<_>>();
+    bonds.sort_by(|(a, _), (b, _)| a.cmp(b));
     let (bonds_idxs, bonds_values): (Vec<Pair<usize>>, Vec<f64>) = bonds
         .into_iter()
         .par_bridge()
@@ -74,7 +77,6 @@ pub fn clean_molecule(input: Molecule) -> CleanedMolecule {
             Some((Pair::from((a, b)), bond))
         })
         .unzip();
-    // .collect::<HashMap<_, _>>();
     (atoms, bonds_idxs, bonds_values)
 }
 
