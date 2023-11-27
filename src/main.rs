@@ -55,7 +55,7 @@ async fn main() {
         .route("/rotation/class/:name", put(rotation_atoms))
         .route("/translation/class/:name", put(translation_atoms))
         .route("/atom/:atom_idx/neighbor", get(get_neighbors))
-        .route("/import", post(import_structure))
+        .route("/import/:name", post(import_structure))
         .route("/substitute", post(add_substitute))
         .route_layer(middleware::from_fn(stack_middleware));
 
