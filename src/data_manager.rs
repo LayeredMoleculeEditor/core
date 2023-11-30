@@ -15,14 +15,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::LMECoreError,
-    serde::{de_arc_layer, de_m3_64, de_v3_64, ser_arc_layer, ser_m3_64, ser_v3_64},
+    serde::{de_arc_layer, ser_arc_layer},
     utils::{BondGraph, InsertResult, NtoN, Pair, UniqueValueMap},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub struct Atom {
     element: usize,
-    #[serde(serialize_with = "ser_v3_64", deserialize_with = "de_v3_64")]
     position: Vector3<f64>,
 }
 
@@ -101,13 +100,10 @@ pub enum Layer {
         valence_table: HashMap<usize, usize>,
     },
     Rotation {
-        #[serde(serialize_with = "ser_m3_64", deserialize_with = "de_m3_64")]
         matrix: Matrix3<f64>,
-        #[serde(serialize_with = "ser_v3_64", deserialize_with = "de_v3_64")]
         center: Vector3<f64>,
     },
     Translate {
-        #[serde(serialize_with = "ser_v3_64", deserialize_with = "de_v3_64")]
         vector: Vector3<f64>,
     },
     Plugin {
