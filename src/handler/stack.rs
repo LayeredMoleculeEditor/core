@@ -208,7 +208,11 @@ pub async fn import_structure(
     Extension(workspace): Extension<Workspace>,
     Extension(stack): Extension<Arc<Stack>>,
     Path(StackNamePathParam { stack_id, name }): Path<StackNamePathParam>,
-    Json((atoms, bonds_idxs, bonds_values)): Json<CleanedMolecule>,
+    Json(CleanedMolecule {
+        atoms,
+        bonds_idxs,
+        bonds_values,
+    }): Json<CleanedMolecule>,
 ) -> Result<Json<Vec<usize>>> {
     let bonds = bonds_idxs
         .into_iter()
@@ -294,15 +298,15 @@ pub async fn add_substitute(
                 stack_id,
                 name: temp_class.clone(),
             }),
-            Json((
+            Json(CleanedMolecule {
                 atoms,
-                configuration
+                bonds_idxs: configuration
                     .bonds_idxs
                     .into_iter()
                     .map(|pair| Pair::from(pair))
                     .collect(),
-                configuration.bonds_values,
-            )),
+                bonds_values: configuration.bonds_values,
+            }),
         )
         .await?;
         let to_remove = indexes

@@ -48,7 +48,13 @@ impl Atom {
 
 type AtomTable = HashMap<usize, Option<Atom>>;
 pub type Molecule = (AtomTable, BondGraph);
-pub type CleanedMolecule = (Vec<Atom>, Vec<Pair<usize>>, Vec<f64>);
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CleanedMolecule {
+    pub atoms: Vec<Atom>,
+    pub bonds_idxs: Vec<Pair<usize>>,
+    pub bonds_values: Vec<f64>,
+}
 
 pub fn clean_molecule(input: Molecule) -> CleanedMolecule {
     let (atoms, bonds) = input;
@@ -75,7 +81,11 @@ pub fn clean_molecule(input: Molecule) -> CleanedMolecule {
             Some((Pair::from((a, b)), bond))
         })
         .unzip();
-    (atoms, bonds_idxs, bonds_values)
+    CleanedMolecule {
+        atoms,
+        bonds_idxs,
+        bonds_values,
+    }
 }
 
 pub fn empty_tables() -> Molecule {
@@ -311,7 +321,11 @@ impl LayerTree {
         self,
         base: Option<Arc<Stack>>,
     ) -> Result<HashMap<usize, Arc<Stack>>, LMECoreError> {
-        let layer = Arc::new(Stack { config: self.config, base, cached: self.cached });
+        let layer = Arc::new(Stack {
+            config: self.config,
+            base,
+            cached: self.cached,
+        });
         let mut stacks = self
             .indexes
             .into_iter()
@@ -324,7 +338,11 @@ impl LayerTree {
         Ok(stacks)
     }
 
-    pub fn merge(&mut self, mut reversed_stack: Vec<(Layer, Molecule)>, index: usize) -> Option<Vec<(Layer, Molecule)>> {
+    pub fn merge(
+        &mut self,
+        mut reversed_stack: Vec<(Layer, Molecule)>,
+        index: usize,
+    ) -> Option<Vec<(Layer, Molecule)>> {
         let (root_layer, _) = reversed_stack
             .last()
             .expect("Each stack input should always contains at least 1 element");
@@ -372,7 +390,8 @@ impl From<(Vec<(Layer, Molecule)>, usize)> for LayerTree {
         });
         while let Some((config, cache)) = stack.pop() {
             layer_tree = Box::new(Self {
-                config, cached: cache,
+                config,
+                cached: cache,
                 indexes: vec![],
                 children: vec![layer_tree],
             })
