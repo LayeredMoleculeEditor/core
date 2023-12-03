@@ -240,9 +240,7 @@ pub async fn import_structure(
 
 #[derive(Deserialize, Debug)]
 pub struct AddSubstitute {
-    atoms: Vec<Atom>,
-    bonds_idxs: Vec<(usize, usize)>,
-    bonds_values: Vec<f64>,
+    structure: CleanedMolecule,
     current: (usize, usize),
     target: (usize, usize),
     class_name: Option<String>,
@@ -267,9 +265,10 @@ pub async fn add_substitute(
         );
 
     let current_atoms = configuration
+        .structure
         .atoms
         .get(configuration.current.0)
-        .zip(configuration.atoms.get(configuration.current.1));
+        .zip(configuration.structure.atoms.get(configuration.current.1));
 
     if let Some(((base_entry, base_center), (sub_entry, sub_center))) =
         target_atoms.zip(current_atoms)
@@ -281,6 +280,7 @@ pub async fn add_substitute(
         let center = *sub_center.get_position();
         let translation_vector = base_center.get_position() - sub_center.get_position();
         let atoms = configuration
+            .structure
             .atoms
             .into_par_iter()
             .map(|atom| {
@@ -301,11 +301,12 @@ pub async fn add_substitute(
             Json(CleanedMolecule {
                 atoms,
                 bonds_idxs: configuration
+                    .structure
                     .bonds_idxs
                     .into_iter()
                     .map(|pair| Pair::from(pair))
                     .collect(),
-                bonds_values: configuration.bonds_values,
+                bonds_values: configuration.structure.bonds_values,
             }),
         )
         .await?;
