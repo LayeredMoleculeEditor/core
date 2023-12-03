@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::sync::Arc;
 
 use crate::data_manager::Stack;
 
