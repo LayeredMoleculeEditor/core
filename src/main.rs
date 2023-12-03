@@ -46,7 +46,6 @@ async fn main() {
     let stack_rt = Router::new()
         .route("/", get(read_stack))
         .route("/", patch(write_to_layer))
-        // .route("/", put(overlay_to))
         .route("/", delete(remove_stack))
         .route("/writable", get(is_writable))
         .route("/cleaned", get(read_cleaned))
