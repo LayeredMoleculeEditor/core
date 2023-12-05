@@ -13,7 +13,7 @@ use rayon::prelude::*;
 use serde::Deserialize;
 
 use crate::{
-    data_manager::{clean_molecule, Atom, CleanedMolecule, Layer, Molecule, Stack, Workspace},
+    data_manager::{clean_molecule, CleanedMolecule, Layer, Molecule, Stack, Workspace},
     error::LMECoreError,
     utils::{vector_align_rotation, BondGraph, Pair},
 };
