@@ -73,7 +73,7 @@ async fn main() {
         .route("/", delete(remove_workspace));
 
     let router = Router::new()
-        .nest("/workspaces/:ws", workspace_rt)
+        .nest("/ws/:ws", workspace_rt)
         .with_state(store);
 
     axum::Server::bind(&listen)
