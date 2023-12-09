@@ -108,7 +108,7 @@ pub async fn clone_stack(
     Extension(workspace): Extension<Workspace>,
     Path(StackPathParam { stack_id }): Path<StackPathParam>,
     Json(CloneStackOptions { amount }): Json<CloneStackOptions>,
-) -> Result<Json<usize>, LMECoreError> {
+) -> Result<Json<(usize, usize)>, LMECoreError> {
     Ok(Json(workspace.clone_stack(stack_id, amount).await?))
 }
 
