@@ -488,7 +488,11 @@ impl Workspace {
         self.stacks.write().await.remove(idx);
     }
 
-    pub async fn clone_stack(&self, idx: usize, amount: usize) -> Result<(usize, usize), LMECoreError> {
+    pub async fn clone_stack(
+        &self,
+        idx: usize,
+        amount: usize,
+    ) -> Result<(usize, usize), LMECoreError> {
         let stack = self.get_stack(idx).await?;
         let mut stacks = self.stacks.write().await;
         let start_from = stacks.len();
@@ -498,14 +502,19 @@ impl Workspace {
         Ok((start_from, stacks.len()))
     }
 
-    pub async fn clone_base(&self, idx: usize, amount: usize) -> Result<usize, LMECoreError> {
+    pub async fn clone_base(
+        &self,
+        idx: usize,
+        amount: usize,
+    ) -> Result<(usize, usize), LMECoreError> {
         let stack = self.get_stack(idx).await?;
         if let Some(base) = stack.clone_base() {
             let mut stacks = self.stacks.write().await;
+            let start = stacks.len();
             for _ in 0..amount {
                 stacks.push(base.clone());
             }
-            Ok(stacks.len() - 1)
+            Ok((start, stacks.len()))
         } else {
             Err(LMECoreError::RootLayerError)
         }
