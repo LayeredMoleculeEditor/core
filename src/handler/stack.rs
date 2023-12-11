@@ -7,7 +7,7 @@ use axum::{
     response::{ErrorResponse, Response, Result},
     Extension, Json,
 };
-use nalgebra::{Rotation3, Unit, Vector3};
+use nalgebra::{Rotation3, Transform3, Unit, Vector3, Matrix4, Point3};
 use nanoid::nanoid;
 use rayon::prelude::*;
 use serde::Deserialize;
@@ -20,7 +20,7 @@ use crate::{
 
 use super::{
     namespace::{class_indexes, set_to_class},
-    params::{AtomPathParam, NamePathParam, StackNamePathParam},
+    params::{AtomPathParam, NamePathParam, StackNamePathParam}, workspace,
 };
 
 #[derive(Deserialize)]
@@ -120,12 +120,11 @@ pub async fn clone_base(
     Ok(Json(workspace.clone_base(stack_id, amount).await?))
 }
 
-// Complex level APIs
-pub async fn rotation_atoms(
+pub async fn transform_atoms(
     Extension(workspace): Extension<Workspace>,
     Extension(stack): Extension<Arc<Stack>>,
     Path(StackNamePathParam { stack_id, name }): Path<StackNamePathParam>,
-    Json((center, axis, angle)): Json<([f64; 3], [f64; 3], f64)>,
+    Json(transform): Json<Transform3<f64>>,
 ) -> Result<(), LMECoreError> {
     let Json(indexes) = class_indexes(
         Extension(workspace.clone()),
@@ -133,14 +132,11 @@ pub async fn rotation_atoms(
         Path(NamePathParam { name }),
     )
     .await;
-    let center = Vector3::from(center);
-    let axis = Vector3::from(axis);
-    let rotation = Rotation3::from_axis_angle(&Unit::new_normalize(axis), angle);
-    let rotation_matrix = rotation.matrix();
     let atoms = stack
         .read()
-        .clone()
         .0
+        .clone()
+        .into_par_iter()
         .into_par_iter()
         .filter_map(|(idx, atom)| {
             atom.and_then(|atom| {
@@ -151,14 +147,7 @@ pub async fn rotation_atoms(
                 }
             })
         })
-        .map(|(idx, atom)| {
-            (
-                idx,
-                Some(atom.update_position(|origin| {
-                    ((origin - center).transpose() * rotation_matrix).transpose() + center
-                })),
-            )
-        })
+        .map(|(idx, atom)| (idx, Some(atom.transform_position(&transform))))
         .collect::<HashMap<_, _>>();
     write_to_layer(
         Extension(workspace),
@@ -168,40 +157,29 @@ pub async fn rotation_atoms(
     .await
 }
 
-pub async fn translation_atoms(
-    Extension(workspace): Extension<Workspace>,
-    Extension(stack): Extension<Arc<Stack>>,
-    Path(StackNamePathParam { stack_id, name }): Path<StackNamePathParam>,
-    Json(vector): Json<[f64; 3]>,
+// Complex level APIs
+pub async fn rotation_atoms(
+    workspace: Extension<Workspace>,
+    stack: Extension<Arc<Stack>>,
+    params: Path<StackNamePathParam>,
+    Json((center, axis, angle)): Json<(Point3<f64>, Vector3<f64>, f64)>,
 ) -> Result<(), LMECoreError> {
-    let Json(indexes) = class_indexes(
-        Extension(workspace.clone()),
-        Extension(stack.clone()),
-        Path(NamePathParam { name }),
-    )
-    .await;
-    let vector = Vector3::from(vector);
-    let atoms = stack
-        .read()
-        .0
-        .clone()
-        .into_par_iter()
-        .filter_map(|(idx, atom)| {
-            atom.and_then(|atom| {
-                if indexes.contains(&idx) {
-                    Some((idx, Some(atom.update_position(|origin| origin + vector))))
-                } else {
-                    None
-                }
-            })
-        })
-        .collect::<HashMap<_, _>>();
-    write_to_layer(
-        Extension(workspace),
-        Path(StackPathParam { stack_id }),
-        Json((atoms, BondGraph::new())),
-    )
-    .await
+    let transform = Transform3::from_matrix_unchecked(
+        Matrix4::new_rotation_wrt_point(axis * angle, center)
+    );
+    transform_atoms(workspace, stack, params, Json(transform)).await
+}
+
+pub async fn translation_atoms(
+    workspace: Extension<Workspace>,
+    stack: Extension<Arc<Stack>>,
+    params: Path<StackNamePathParam>,
+    Json(vector): Json<Vector3<f64>>,
+) -> Result<(), LMECoreError> {
+    let transform = Transform3::from_matrix_unchecked(
+        Matrix4::new_translation(&vector)
+    );
+    transform_atoms(workspace, stack, params, Json(transform)).await
 }
 
 pub async fn import_structure(

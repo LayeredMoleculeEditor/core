@@ -9,7 +9,7 @@ use tokio::{io::AsyncWriteExt, join, process::Command, sync::RwLock};
 
 use futures::future::join_all;
 use lazy_static::lazy_static;
-use nalgebra::{Matrix3, Vector3};
+use nalgebra::{Matrix3, Vector3, Transform3};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +28,10 @@ pub struct Atom {
 impl Atom {
     pub fn new(element: usize, position: Vector3<f64>) -> Self {
         Self { element, position }
+    }
+
+    pub fn transform_position(self, transform: &Transform3<f64>) -> Self {
+        Self { element: self.element, position: transform * self.position }
     }
 
     pub fn update_position<F>(self, f: F) -> Self
