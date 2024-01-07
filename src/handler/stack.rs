@@ -13,7 +13,7 @@ use rayon::prelude::*;
 use serde::Deserialize;
 
 use crate::{
-    data_manager::{clean_molecule, CleanedMolecule, Layer, Molecule, Stack, Workspace},
+    data_manager::{clean_molecule, CompactedMolecule, Layer, Molecule, Stack, Workspace},
     error::LMECoreError,
     utils::{vector_align_rotation, BondGraph, Pair},
 };
@@ -46,7 +46,7 @@ pub async fn read_stack(Extension(stack): Extension<Arc<Stack>>) -> Json<Molecul
     Json(stack.read().clone())
 }
 
-pub async fn read_cleaned(Extension(stack): Extension<Arc<Stack>>) -> Json<CleanedMolecule> {
+pub async fn read_cleaned(Extension(stack): Extension<Arc<Stack>>) -> Json<CompactedMolecule> {
     Json(clean_molecule(stack.read().clone()))
 }
 
@@ -186,11 +186,11 @@ pub async fn import_structure(
     Extension(workspace): Extension<Workspace>,
     Extension(stack): Extension<Arc<Stack>>,
     Path(StackNamePathParam { stack_id, name }): Path<StackNamePathParam>,
-    Json(CleanedMolecule {
+    Json(CompactedMolecule {
         atoms,
         bonds_idxs,
         bonds_values,
-    }): Json<CleanedMolecule>,
+    }): Json<CompactedMolecule>,
 ) -> Result<Json<Vec<usize>>> {
     let bonds = bonds_idxs
         .into_iter()
@@ -218,7 +218,7 @@ pub async fn import_structure(
 
 #[derive(Deserialize, Debug)]
 pub struct AddSubstitute {
-    structure: CleanedMolecule,
+    structure: CompactedMolecule,
     current: (usize, usize),
     target: (usize, usize),
     class_name: Option<String>,
@@ -276,7 +276,7 @@ pub async fn add_substitute(
                 stack_id,
                 name: temp_class.clone(),
             }),
-            Json(CleanedMolecule {
+            Json(CompactedMolecule {
                 atoms,
                 bonds_idxs: configuration
                     .structure

@@ -54,13 +54,13 @@ type AtomTable = HashMap<usize, Option<Atom>>;
 pub type Molecule = (AtomTable, BondGraph);
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct CleanedMolecule {
+pub struct CompactedMolecule {
     pub atoms: Vec<Atom>,
     pub bonds_idxs: Vec<Pair<usize>>,
     pub bonds_values: Vec<f64>,
 }
 
-pub fn clean_molecule(input: Molecule) -> CleanedMolecule {
+pub fn clean_molecule(input: Molecule) -> CompactedMolecule {
     let (atoms, bonds) = input;
     let mut atoms = atoms
         .into_par_iter()
@@ -85,7 +85,7 @@ pub fn clean_molecule(input: Molecule) -> CleanedMolecule {
             Some((Pair::from((a, b)), bond))
         })
         .unzip();
-    CleanedMolecule {
+    CompactedMolecule {
         atoms,
         bonds_idxs,
         bonds_values,
