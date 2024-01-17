@@ -46,21 +46,13 @@ mod entity {
 
     #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
     pub enum Layer {
-        Empty,
         Fill(Molecule),
         Transform(Transform3<f64>),
-    }
-
-    impl Default for Layer {
-        fn default() -> Self {
-            Self::Fill(Molecule::default())
-        }
     }
 
     impl Layer {
         pub fn filter(&self, mut low: Molecule) -> Molecule {
             match self {
-                Self::Empty => Molecule::default(),
                 Self::Fill(high) => Molecule::merge(low, high.clone()),
                 Self::Transform(transform) => {
                     low.atoms.iter_mut().for_each(|(_, atom)| {
@@ -121,7 +113,14 @@ pub struct Workspace {
     base: Molecule,
     stacks: Vec<Arc<Stack>>,
     caches: Vec<Molecule>,
-    layer_store: Vec<Arc<Layer>>,
+    atom_names: HashMap<String, usize>,
+    groups: NtoN<String, usize>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct WorkspaceExport {
+    base: Molecule,
+    stacks: StackTree,
     atom_names: HashMap<String, usize>,
     groups: NtoN<String, usize>,
 }
@@ -129,12 +128,6 @@ pub struct Workspace {
 impl Workspace {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn create_layer(&mut self, layer: Arc<Layer>) -> usize {
-        let index = self.layer_store.len();
-        self.layer_store.push(layer);
-        index
     }
 
     pub fn create_stack(&mut self, stack: Arc<Stack>, copies: usize) -> usize {
@@ -150,19 +143,6 @@ impl Workspace {
     pub fn create_stack_from_layer(&mut self, layer: Arc<Layer>, copies: usize) -> usize {
         let stack = Stack::new(layer);
         self.create_stack(Arc::new(stack), copies)
-    }
-
-    pub fn create_stack_from_layer_store(
-        &mut self,
-        layer_idx: usize,
-        copies: usize,
-    ) -> Result<usize, WorkspaceError> {
-        let layer = self
-            .layer_store
-            .get(layer_idx)
-            .ok_or(WorkspaceError::LayerStoreOutOfIndex)?;
-        let stack = Stack::new(layer.clone());
-        Ok(self.create_stack(Arc::new(stack), copies))
     }
 
     pub fn clone_stack(
@@ -237,19 +217,6 @@ impl Workspace {
             Ok(())
         }
     }
-
-    pub fn add_layer_from_store(
-        &mut self,
-        start_idx: usize,
-        copies: usize,
-        layer_idx: usize,
-    ) -> Result<(), WorkspaceError> {
-        let layer = self
-            .layer_store
-            .get(layer_idx)
-            .ok_or(WorkspaceError::LayerStoreOutOfIndex)?;
-        self.add_layer_to_stack(start_idx, copies, layer.clone())
-    }
 }
 
 pub enum WorkspaceError {
@@ -266,6 +233,23 @@ pub struct StackTree {
 }
 
 impl StackTree {
+    pub fn generate<'a, I>(stacks: I) -> Vec<StackTree>
+    where
+        I: IntoIterator<Item = &'a Arc<Stack>>,
+    {
+        let mut trees = vec![];
+        for (idx, stack) in stacks.into_iter().enumerate() {
+            let matched = trees
+                .iter_mut()
+                .map(|tree: &mut StackTree| tree.merge(idx, stack.get_layers()))
+                .any(|result| result);
+            if !matched {
+                trees.push(StackTree::from((stack.get_layers().as_slice(), idx)))
+            }
+        }
+        trees
+    }
+
     fn merge(&mut self, idx: usize, layers: &[Arc<Layer>]) -> bool {
         let (current, elements) = layers
             .split_first()
