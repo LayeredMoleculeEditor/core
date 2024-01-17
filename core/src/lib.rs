@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use entity::{Layer, Molecule, Stack};
 use n_to_n::NtoN;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{de::value, Deserialize, Serialize};
 
 mod entity {
     use std::{collections::HashMap, sync::Arc};
@@ -68,8 +68,8 @@ mod entity {
     pub struct Stack(Vec<Arc<Layer>>);
 
     impl Stack {
-        pub fn new(layer: Arc<Layer>) -> Self {
-            Self(vec![layer])
+        pub fn new(layer: Vec<Arc<Layer>>) -> Self {
+            Self(layer)
         }
 
         pub fn get_layers(&self) -> &Vec<Arc<Layer>> {
@@ -120,7 +120,7 @@ pub struct Workspace {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct WorkspaceExport {
     base: Molecule,
-    stacks: StackTree,
+    stacks: Vec<StackTree>,
     atom_names: HashMap<String, usize>,
     groups: NtoN<String, usize>,
 }
@@ -141,7 +141,7 @@ impl Workspace {
     }
 
     pub fn create_stack_from_layer(&mut self, layer: Arc<Layer>, copies: usize) -> usize {
-        let stack = Stack::new(layer);
+        let stack = Stack::new(vec![layer]);
         self.create_stack(Arc::new(stack), copies)
     }
 
@@ -219,6 +219,31 @@ impl Workspace {
     }
 }
 
+impl From<&Workspace> for WorkspaceExport {
+    fn from(value: &Workspace) -> Self {
+        Self {
+            base: value.base.clone(),
+            stacks: StackTree::dehydration(&value.stacks),
+            atom_names: value.atom_names.clone(),
+            groups: value.groups.clone(),
+        }
+    }
+}
+
+impl Into<Workspace> for &WorkspaceExport {
+    fn into(self) -> Workspace {
+        let stacks = StackTree::hydration(&self.stacks);
+        let caches = stacks.iter().map(|stack| stack.read(self.base.clone())).collect();
+        Workspace {
+            base: self.base.clone(),
+            stacks,
+            caches,
+            atom_names: self.atom_names.clone(),
+            groups: self.groups.clone(),
+        }
+    }
+}
+
 pub enum WorkspaceError {
     LayerStoreOutOfIndex,
     StacksOutOfIndex,
@@ -233,7 +258,7 @@ pub struct StackTree {
 }
 
 impl StackTree {
-    pub fn generate<'a, I>(stacks: I) -> Vec<StackTree>
+    pub fn dehydration<'a, I>(stacks: I) -> Vec<StackTree>
     where
         I: IntoIterator<Item = &'a Arc<Stack>>,
     {
@@ -248,6 +273,34 @@ impl StackTree {
             }
         }
         trees
+    }
+
+    pub fn hydration<'a, I>(trees: I) -> Vec<Arc<Stack>>
+    where
+        I: IntoIterator<Item = &'a StackTree>,
+    {
+        let mut stacks: HashMap<usize, Arc<Stack>> = HashMap::new();
+
+        for tree in trees.into_iter() {
+            stacks.extend(tree.to_stacks(&vec![]));
+        }
+
+        let mut stacks = stacks.into_iter().collect::<Vec<_>>();
+        stacks.sort_by(|(a, _), (b, _)| a.cmp(b));
+        stacks.into_iter().map(|(_, stack)| stack).collect()
+    }
+
+    fn to_stacks(&self, base: &Vec<Arc<Layer>>) -> HashMap<usize, Arc<Stack>> {
+        let mut map = HashMap::new();
+        let mut base = base.clone();
+        base.push(Arc::new(self.layer.clone()));
+        for index in &self.indexes {
+            map.insert(*index, Arc::new(Stack::new(base.clone())));
+        }
+        for child in &self.children {
+            map.extend(child.to_stacks(&base));
+        }
+        map
     }
 
     fn merge(&mut self, idx: usize, layers: &[Arc<Layer>]) -> bool {
