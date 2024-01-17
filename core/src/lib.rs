@@ -233,7 +233,10 @@ impl From<&Workspace> for WorkspaceExport {
 impl Into<Workspace> for &WorkspaceExport {
     fn into(self) -> Workspace {
         let stacks = StackTree::hydration(&self.stacks);
-        let caches = stacks.iter().map(|stack| stack.read(self.base.clone())).collect();
+        let caches = stacks
+            .iter()
+            .map(|stack| stack.read(self.base.clone()))
+            .collect();
         Workspace {
             base: self.base.clone(),
             stacks,

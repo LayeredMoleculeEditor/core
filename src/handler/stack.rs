@@ -7,7 +7,7 @@ use axum::{
     response::{ErrorResponse, Response, Result},
     Extension, Json,
 };
-use nalgebra::{Rotation3, Transform3, Unit, Vector3, Matrix4, Point3};
+use nalgebra::{Matrix4, Point3, Rotation3, Transform3, Unit, Vector3};
 use nanoid::nanoid;
 use rayon::prelude::*;
 use serde::Deserialize;
@@ -20,7 +20,8 @@ use crate::{
 
 use super::{
     namespace::{class_indexes, set_to_class},
-    params::{AtomPathParam, NamePathParam, StackNamePathParam}, workspace,
+    params::{AtomPathParam, NamePathParam, StackNamePathParam},
+    workspace,
 };
 
 #[derive(Deserialize)]
@@ -164,9 +165,8 @@ pub async fn rotation_atoms(
     params: Path<StackNamePathParam>,
     Json((center, axis, angle)): Json<(Point3<f64>, Vector3<f64>, f64)>,
 ) -> Result<(), LMECoreError> {
-    let transform = Transform3::from_matrix_unchecked(
-        Matrix4::new_rotation_wrt_point(axis * angle, center)
-    );
+    let transform =
+        Transform3::from_matrix_unchecked(Matrix4::new_rotation_wrt_point(axis * angle, center));
     transform_atoms(workspace, stack, params, Json(transform)).await
 }
 
@@ -176,9 +176,7 @@ pub async fn translation_atoms(
     params: Path<StackNamePathParam>,
     Json(vector): Json<Vector3<f64>>,
 ) -> Result<(), LMECoreError> {
-    let transform = Transform3::from_matrix_unchecked(
-        Matrix4::new_translation(&vector)
-    );
+    let transform = Transform3::from_matrix_unchecked(Matrix4::new_translation(&vector));
     transform_atoms(workspace, stack, params, Json(transform)).await
 }
 
