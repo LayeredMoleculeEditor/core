@@ -24,3 +24,8 @@ clap = { version = "4.4.8", features = ["derive"] }
 async-recursion = "1.0.5"
 futures = "0.3.29"
 lme-core ={ path = "./core"}
+
+[workspace]
+members = [
+    "core", "n_to_n", "pair"
+]
