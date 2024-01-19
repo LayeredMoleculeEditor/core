@@ -3,9 +3,9 @@ use std::{collections::HashMap, sync::Arc};
 use entity::{Layer, Molecule, Stack};
 use n_to_n::NtoN;
 use rayon::prelude::*;
-use serde::{de::value, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
-mod entity {
+pub mod entity {
     use std::{collections::HashMap, sync::Arc};
 
     use n_to_n::NtoN;
@@ -113,8 +113,8 @@ pub struct Workspace {
     base: Molecule,
     stacks: Vec<Arc<Stack>>,
     caches: Vec<Molecule>,
-    atom_names: HashMap<String, usize>,
-    groups: NtoN<String, usize>,
+    pub atom_names: HashMap<String, usize>,
+    pub groups: NtoN<String, usize>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -128,6 +128,10 @@ pub struct WorkspaceExport {
 impl Workspace {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn stacks(&self) -> usize {
+        self.stacks.len()
     }
 
     pub fn create_stack(&mut self, stack: Arc<Stack>, copies: usize) -> usize {
@@ -145,38 +149,22 @@ impl Workspace {
         self.create_stack(Arc::new(stack), copies)
     }
 
-    pub fn clone_stack(
-        &mut self,
-        stack_idx: usize,
-        copies: usize,
-    ) -> Result<usize, WorkspaceError> {
-        let stack = self
-            .stacks
-            .get(stack_idx)
-            .cloned()
-            .ok_or(WorkspaceError::StacksOutOfIndex)?;
+    pub fn clone_stack(&mut self, stack_idx: usize, copies: usize) -> Option<usize> {
+        let stack = self.stacks.get(stack_idx).cloned()?;
 
-        Ok(self.create_stack(stack, copies))
+        Some(self.create_stack(stack, copies))
     }
 
-    pub fn clone_base(&mut self, stack_idx: usize, copies: usize) -> Result<usize, WorkspaceError> {
-        let stack = self
-            .stacks
-            .get(stack_idx)
-            .ok_or(WorkspaceError::StacksOutOfIndex)?;
+    pub fn clone_base(&mut self, stack_idx: usize, copies: usize) -> Option<usize> {
+        let stack = self.stacks.get(stack_idx)?;
         let base = stack.get_base();
-        Ok(self.create_stack(Arc::new(base), copies))
+        Some(self.create_stack(Arc::new(base), copies))
     }
 
-    pub fn write_to_stack(
-        &mut self,
-        start_idx: usize,
-        copies: usize,
-        data: Molecule,
-    ) -> Result<(), WorkspaceError> {
+    pub fn write_to_stack(&mut self, start_idx: usize, copies: usize, data: Molecule) -> bool {
         let max_idx = start_idx + copies - 1;
         if max_idx >= self.stacks.len() {
-            Err(WorkspaceError::StacksOutOfIndex)
+            false
         } else {
             let stacks = (start_idx..start_idx + copies)
                 .par_bridge()
@@ -189,7 +177,7 @@ impl Workspace {
             for (i, stack) in stacks.into_iter().enumerate() {
                 self.stacks[i + start_idx] = Arc::new(stack)
             }
-            Ok(())
+            true
         }
     }
 
@@ -198,10 +186,10 @@ impl Workspace {
         start_idx: usize,
         copies: usize,
         layer: Arc<Layer>,
-    ) -> Result<(), WorkspaceError> {
+    ) -> bool {
         let max_idx = start_idx + copies - 1;
         if max_idx >= self.stacks.len() {
-            Err(WorkspaceError::StacksOutOfIndex)
+            false
         } else {
             let stacks = (start_idx..start_idx + copies)
                 .par_bridge()
@@ -214,7 +202,7 @@ impl Workspace {
             for (i, stack) in stacks.into_iter().enumerate() {
                 self.stacks[i + start_idx] = Arc::new(stack);
             }
-            Ok(())
+            true
         }
     }
 }
@@ -245,12 +233,6 @@ impl Into<Workspace> for &WorkspaceExport {
             groups: self.groups.clone(),
         }
     }
-}
-
-pub enum WorkspaceError {
-    LayerStoreOutOfIndex,
-    StacksOutOfIndex,
-    NoBase,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]

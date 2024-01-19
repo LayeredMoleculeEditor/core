@@ -1,20 +1,16 @@
-use std::net::SocketAddr;
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use axum::{
     middleware,
-    routing::{delete, get, patch, post, put},
+    routing::{delete, post, put},
     Router,
 };
 use clap::Parser;
-use data_manager::create_server_store;
-
-use handler::{namespace::*, server::*, stack::*, workspace::*};
-
-mod data_manager;
+use handler::*;
+use lme_core::Workspace;
+use tokio::sync::{Mutex, RwLock};
 mod error;
 mod handler;
-mod serde;
-mod utils;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -22,59 +18,32 @@ struct Args {
     listen: SocketAddr,
 }
 
+pub type WorkspaceAccessor = Arc<Mutex<Workspace>>;
+pub type ServerState = Arc<RwLock<HashMap<String, WorkspaceAccessor>>>;
+
 #[tokio::main]
 async fn main() {
     let Args { listen } = Args::parse();
 
-    let store = create_server_store();
+    let state: ServerState = Arc::new(RwLock::new(HashMap::new()));
 
-    let namespace_rt = Router::new()
-        .route("/id/:name/stack/:stack_id", get(id_to_index))
-        .route("/class/:name/stack/:stack_id", get(class_indexes))
-        .route_layer(middleware::from_fn(stack_middleware))
-        .route("/id", get(list_ids))
-        .route("/id", post(set_id))
-        .route("/id/atom/:atom_idx", delete(remove_id))
-        .route("/id/atom/:atom_idx", get(index_to_id))
-        .route("/class", get(list_classes))
-        .route("/class", post(set_to_class))
-        .route("/class/:name/atom/:atom_idx", delete(remove_from_class))
-        .route("/class/atom/:atom_idx", get(get_classes))
-        .route("/class/atom/:atom_idx", delete(remove_from_all_class))
-        .route("/class/:name", delete(remove_class));
-
-    let stack_rt = Router::new()
-        .route("/", get(read_stack))
-        .route("/", patch(write_to_layer))
-        .route("/", delete(remove_stack))
-        .route("/writable", get(is_writable))
-        .route("/cleaned", get(read_cleaned))
-        .route("/clone_stack", post(clone_stack))
-        .route("/clone_base", post(clone_base))
-        .route("/rotation/class/:name", put(rotation_atoms))
-        .route("/translation/class/:name", put(translation_atoms))
-        .route("/atom/:atom_idx/neighbor", get(get_neighbors))
-        .route("/import/:name", post(import_structure))
-        .route("/substitute", post(add_substitute))
-        .route_layer(middleware::from_fn(stack_middleware));
-
-    let workspace_rt = Router::new()
-        .route("/export", get(export_workspace))
-        .route("/stacks", get(read_stacks))
-        .route("/stacks", post(new_stack))
-        .route("/stacks/overlay_to", put(overlay_to))
-        .nest("/stacks/:stack_id", stack_rt)
-        .nest("/namespace", namespace_rt)
+    let ws_router = Router::new()
+        .route("/stack/clone_stack", post(clone_stack))
+        .route("/stack/clone_base", post(clone_base))
+        .route("/stack/layer", put(add_layer_to_stack))
+        .route("/stack/write", put(write_to_stack))
+        .route("/stack", post(create_stack))
+        .route("/export", post(workspace_export))
         .layer(middleware::from_fn_with_state(
-            store.clone(),
+            state.clone(),
             workspace_middleware,
-        ))
-        .route("/", post(create_workspace))
-        .route("/", delete(remove_workspace));
+        ));
 
     let router = Router::new()
-        .nest("/ws/:ws", workspace_rt)
-        .with_state(store);
+        .nest("/ws/:ws", ws_router)
+        .route("/ws/:ws", delete(remove_workspace))
+        .route("/ws/:ws", post(create_workspace))
+        .with_state(state);
 
     axum::Server::bind(&listen)
         .serve(router.into_make_service())
