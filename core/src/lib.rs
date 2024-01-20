@@ -6,11 +6,12 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 pub mod entity {
-    use std::{collections::HashMap, sync::Arc};
+    use std::{collections::{HashMap, HashSet}, sync::Arc};
 
     use n_to_n::NtoN;
     use nalgebra::{Point3, Transform3};
     use pair::Pair;
+    use rayon::iter::{IntoParallelIterator, IndexedParallelIterator, ParallelIterator, ParallelBridge};
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, PartialOrd)]
@@ -41,6 +42,27 @@ pub mod entity {
             low.bonds.extend(high.bonds);
             low.groups.extend(high.groups);
             low
+        }
+    }
+
+    pub struct CompactedMolecule {
+        atoms: Vec<Atom>,
+        bonds: HashMap<Pair<usize>, f64>,
+        groups: NtoN<usize, String>
+    }
+
+    impl CompactedMolecule {
+        pub fn unzip(self, offset: usize) -> Molecule {
+            let atoms = self.atoms.into_par_iter().enumerate()
+                .map(|(idx, atom)| (idx + offset, Some(atom)))
+                .collect::<HashMap<_, _>>();
+            let bonds = self.bonds.into_par_iter().map(|(pair, bond_order)| (pair.offset(offset), bond_order))
+            .collect::<HashMap<_, _>>();
+            let groups = self.groups.into_iter().par_bridge().map(|(idx, group_name)| (idx + offset, group_name))
+                .collect::<HashSet<_>>();
+            Molecule {
+                atoms, bonds, groups: NtoN::from(groups)
+            }
         }
     }
 
