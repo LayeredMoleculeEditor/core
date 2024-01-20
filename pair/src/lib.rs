@@ -1,9 +1,18 @@
+use std::ops::Add;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(
     Debug, Default, Deserialize, Serialize, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy,
 )]
 pub struct Pair<T>(T, T);
+
+impl<T:Add<Output = T> + Copy> Pair<T> {
+    pub fn offset(self, offset: T) -> Self {
+        let Self(a, b) = self;
+        Self(a + offset, b + offset)
+    }
+}
 
 impl<T> Pair<T> {
     pub fn new(a: T, b: T) -> Self {
