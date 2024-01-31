@@ -6,8 +6,9 @@ mod state_handler {
         http::{Request, StatusCode},
         middleware::Next,
         response::{IntoResponse, Response},
+        Json,
     };
-    use lme_core::Workspace;
+    use lme_core::{entity::Molecule, Workspace};
     use serde::Deserialize;
     use tokio::sync::Mutex;
 
@@ -21,12 +22,13 @@ mod state_handler {
     pub async fn create_workspace(
         State(state): State<ServerState>,
         Path(WorkspaceParam { ws }): Path<WorkspaceParam>,
+        Json(base): Json<Molecule>,
     ) -> StatusCode {
         let mut state = state.write().await;
         if state.contains_key(&ws) {
             StatusCode::CONFLICT
         } else {
-            state.insert(ws, Arc::new(Mutex::new(Workspace::new())));
+            state.insert(ws, Arc::new(Mutex::new(Workspace::new(base))));
             StatusCode::OK
         }
     }
@@ -75,8 +77,22 @@ mod workspace_handler {
 
     use crate::WorkspaceAccessor;
 
-    pub async fn stacks(Extension(workspace): Extension<WorkspaceAccessor>) -> Json<usize> {
-        Json(workspace.lock().await.stacks())
+    #[derive(Deserialize)]
+    pub struct StacksSelect {
+        start: usize,
+        range: usize,
+    }
+
+    pub async fn read_stacks(
+        Extension(workspace): Extension<WorkspaceAccessor>,
+        Query(StacksSelect { start, range }): Query<StacksSelect>,
+    ) -> Result<Json<Vec<Molecule>>> {
+        let workspace = workspace.lock().await;
+        (start..start + range)
+            .map(|index| workspace.read(index))
+            .collect::<Option<Vec<_>>>()
+            .map(|result| Json(result))
+            .ok_or(ErrorResponse::from(StatusCode::NOT_FOUND))
     }
 
     #[derive(Deserialize)]
@@ -101,7 +117,7 @@ mod workspace_handler {
     #[derive(Deserialize)]
     pub struct WriteToStack {
         start_idx: usize,
-        copies: usize,
+        range: usize,
         data: Molecule,
     }
 
@@ -109,7 +125,7 @@ mod workspace_handler {
         Extension(workspace): Extension<WorkspaceAccessor>,
         Json(WriteToStack {
             start_idx,
-            copies,
+            range,
             data,
         }): Json<WriteToStack>,
     ) -> Json<bool> {
@@ -117,14 +133,14 @@ mod workspace_handler {
             workspace
                 .lock()
                 .await
-                .write_to_stack(start_idx, copies, data),
+                .write_to_stack(start_idx, range, data),
         )
     }
 
     #[derive(Deserialize)]
     pub struct AddLayerToStack {
         start_idx: usize,
-        copies: usize,
+        range: usize,
         layer: Layer,
     }
 
@@ -132,7 +148,7 @@ mod workspace_handler {
         Extension(workspace): Extension<WorkspaceAccessor>,
         Json(AddLayerToStack {
             start_idx,
-            copies,
+            range,
             layer,
         }): Json<AddLayerToStack>,
     ) -> Json<bool> {
@@ -140,7 +156,7 @@ mod workspace_handler {
             workspace
                 .lock()
                 .await
-                .add_layer_to_stack(start_idx, copies, Arc::new(layer)),
+                .add_layer_to_stack(start_idx, range, Arc::new(layer)),
         )
     }
 

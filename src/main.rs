@@ -2,7 +2,7 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use axum::{
     middleware,
-    routing::{delete, post, put},
+    routing::{delete, post, put, get},
     Router,
 };
 use clap::Parser;
@@ -34,6 +34,7 @@ async fn main() {
         .route("/stack/write", put(write_to_stack))
         .route("/stack", post(create_stack))
         .route("/export", post(workspace_export))
+        .route("/", get(read_stacks))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             workspace_middleware,
