@@ -6,12 +6,17 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 pub mod entity {
-    use std::{collections::{HashMap, HashSet}, sync::Arc};
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
 
     use n_to_n::NtoN;
     use nalgebra::{Point3, Transform3};
     use pair::Pair;
-    use rayon::iter::{IntoParallelIterator, IndexedParallelIterator, ParallelIterator, ParallelBridge};
+    use rayon::iter::{
+        IndexedParallelIterator, IntoParallelIterator, ParallelBridge, ParallelIterator,
+    };
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, PartialOrd)]
@@ -48,20 +53,32 @@ pub mod entity {
     pub struct CompactedMolecule {
         atoms: Vec<Atom>,
         bonds: HashMap<Pair<usize>, f64>,
-        groups: NtoN<usize, String>
+        groups: NtoN<usize, String>,
     }
 
     impl CompactedMolecule {
         pub fn unzip(self, offset: usize) -> Molecule {
-            let atoms = self.atoms.into_par_iter().enumerate()
+            let atoms = self
+                .atoms
+                .into_par_iter()
+                .enumerate()
                 .map(|(idx, atom)| (idx + offset, Some(atom)))
                 .collect::<HashMap<_, _>>();
-            let bonds = self.bonds.into_par_iter().map(|(pair, bond_order)| (pair.offset(offset), bond_order))
-            .collect::<HashMap<_, _>>();
-            let groups = self.groups.into_iter().par_bridge().map(|(idx, group_name)| (idx + offset, group_name))
+            let bonds = self
+                .bonds
+                .into_par_iter()
+                .map(|(pair, bond_order)| (pair.offset(offset), bond_order))
+                .collect::<HashMap<_, _>>();
+            let groups = self
+                .groups
+                .into_iter()
+                .par_bridge()
+                .map(|(idx, group_name)| (idx + offset, group_name))
                 .collect::<HashSet<_>>();
             Molecule {
-                atoms, bonds, groups: NtoN::from(groups)
+                atoms,
+                bonds,
+                groups: NtoN::from(groups),
             }
         }
     }
@@ -134,7 +151,6 @@ pub mod entity {
 pub struct Workspace {
     base: Molecule,
     stacks: Vec<Arc<Stack>>,
-    caches: Vec<Molecule>,
     pub atom_names: HashMap<String, usize>,
     pub groups: NtoN<String, usize>,
 }
@@ -148,8 +164,19 @@ pub struct WorkspaceExport {
 }
 
 impl Workspace {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(base: Molecule) -> Self {
+        Self {
+            base,
+            stacks: vec![],
+            atom_names: HashMap::new(),
+            groups: NtoN::new(),
+        }
+    }
+
+    pub fn read(&self, index: usize) -> Option<Molecule> {
+        self.stacks
+            .get(index)
+            .map(|stack| stack.read(self.base.clone()))
     }
 
     pub fn stacks(&self) -> usize {
@@ -158,10 +185,8 @@ impl Workspace {
 
     pub fn create_stack(&mut self, stack: Arc<Stack>, copies: usize) -> usize {
         let index = self.stacks.len();
-        let cache = stack.read(self.base.clone());
         for _ in 0..=copies {
             self.stacks.push(stack.clone());
-            self.caches.push(cache.clone());
         }
         index
     }
@@ -183,12 +208,12 @@ impl Workspace {
         Some(self.create_stack(Arc::new(base), copies))
     }
 
-    pub fn write_to_stack(&mut self, start_idx: usize, copies: usize, data: Molecule) -> bool {
-        let max_idx = start_idx + copies - 1;
+    pub fn write_to_stack(&mut self, start_idx: usize, range: usize, data: Molecule) -> bool {
+        let max_idx = start_idx + range - 1;
         if max_idx >= self.stacks.len() {
             false
         } else {
-            let stacks = (start_idx..start_idx + copies)
+            let stacks = (start_idx..start_idx + range)
                 .par_bridge()
                 .map(|i| {
                     let mut stack = self.stacks[i].as_ref().clone();
@@ -206,14 +231,14 @@ impl Workspace {
     pub fn add_layer_to_stack(
         &mut self,
         start_idx: usize,
-        copies: usize,
+        range: usize,
         layer: Arc<Layer>,
     ) -> bool {
-        let max_idx = start_idx + copies - 1;
+        let max_idx = start_idx + range - 1;
         if max_idx >= self.stacks.len() {
             false
         } else {
-            let stacks = (start_idx..start_idx + copies)
+            let stacks = (start_idx..start_idx + range)
                 .par_bridge()
                 .map(|i| {
                     let mut stack = self.stacks[i].as_ref().clone();
@@ -243,14 +268,9 @@ impl From<&Workspace> for WorkspaceExport {
 impl Into<Workspace> for &WorkspaceExport {
     fn into(self) -> Workspace {
         let stacks = StackTree::hydration(&self.stacks);
-        let caches = stacks
-            .iter()
-            .map(|stack| stack.read(self.base.clone()))
-            .collect();
         Workspace {
             base: self.base.clone(),
             stacks,
-            caches,
             atom_names: self.atom_names.clone(),
             groups: self.groups.clone(),
         }
