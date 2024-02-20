@@ -79,8 +79,8 @@ mod workspace_handler {
 
     #[derive(Deserialize)]
     pub struct StacksSelect {
-        start: usize,
-        range: usize,
+        pub start: usize,
+        pub range: usize,
     }
 
     pub async fn read_stacks(
@@ -114,49 +114,29 @@ mod workspace_handler {
         Json(workspace.create_stack(Arc::new(Stack::new(vec![])), copies))
     }
 
-    #[derive(Deserialize)]
-    pub struct WriteToStack {
-        start_idx: usize,
-        range: usize,
-        data: Molecule,
-    }
-
     pub async fn write_to_stack(
         Extension(workspace): Extension<WorkspaceAccessor>,
-        Json(WriteToStack {
-            start_idx,
-            range,
-            data,
-        }): Json<WriteToStack>,
+        Query(StacksSelect { start, range }): Query<StacksSelect>,
+        Json(data): Json<Molecule>
     ) -> Json<bool> {
         Json(
             workspace
                 .lock()
                 .await
-                .write_to_stack(start_idx, range, data),
+                .write_to_stack(start, range, data),
         )
-    }
-
-    #[derive(Deserialize)]
-    pub struct AddLayerToStack {
-        start_idx: usize,
-        range: usize,
-        layer: Layer,
     }
 
     pub async fn add_layer_to_stack(
         Extension(workspace): Extension<WorkspaceAccessor>,
-        Json(AddLayerToStack {
-            start_idx,
-            range,
-            layer,
-        }): Json<AddLayerToStack>,
+        Query(StacksSelect { start, range }): Query<StacksSelect>,
+        Json(layer): Json<Layer>
     ) -> Json<bool> {
         Json(
             workspace
                 .lock()
                 .await
-                .add_layer_to_stack(start_idx, range, Arc::new(layer)),
+                .add_layer_to_stack(start, range, Arc::new(layer)),
         )
     }
 
@@ -195,6 +175,16 @@ mod workspace_handler {
     ) -> Json<WorkspaceExport> {
         Json(WorkspaceExport::from(workspace.lock().await.deref()))
     }
+}
+
+mod chemistry_handler {
+    use std::collections::HashMap;
+
+    use axum::{extract::Query, Extension, Json};
+
+    use crate::{StacksSelect, WorkspaceAccessor};
+
+    pub fn modify_bonds(Extension(workspace): Extension<WorkspaceAccessor>, Query(StacksSelect {start, range}): Query<StacksSelect>, Json(bonds): Json<HashMap<Pair<usize>, f64>>) -> Json<bool> {}
 }
 
 pub use state_handler::*;
