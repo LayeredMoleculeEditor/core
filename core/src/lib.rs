@@ -26,11 +26,16 @@ pub mod entity {
     }
 
     impl Atom {
+        pub fn set_element(self, element: usize) -> Self {
+            Self { element, ..self }
+        }
+
+        pub fn set_position(self, position: Point3<f64>) -> Self {
+            Self { position, ..self }
+        }
+
         pub fn transform_position(self, transform: &Transform3<f64>) -> Self {
-            Self {
-                position: transform * self.position,
-                ..self
-            }
+            self.set_position(transform * self.position)
         }
     }
 
@@ -87,6 +92,10 @@ pub mod entity {
     pub enum Layer {
         Fill(Molecule),
         Transform(Transform3<f64>),
+        IgnoreBonds,
+        ReplaceElement(usize, usize),
+        RemoveElement(usize),
+        PluginFilter(String, Vec<String>)
     }
 
     impl Layer {
@@ -99,6 +108,35 @@ pub mod entity {
                     });
                     low
                 }
+                Self::IgnoreBonds => {
+                    low.bonds = HashMap::new();
+                    low
+                }
+                Self::ReplaceElement(origin, target) => {
+                    low.atoms.iter_mut().for_each(|(_, atom)| {
+                        *atom = atom.map(|atom| {
+                            if &atom.element == origin {
+                                atom.set_element(*target)
+                            } else {
+                                atom
+                            }
+                        })
+                    });
+                    low
+                }
+                Self::RemoveElement(element) => {
+                    low.atoms.iter_mut().for_each(|(_, atom)| {
+                        *atom = atom.and_then(|atom| {
+                            if &atom.element == element {
+                                None
+                            } else {
+                                Some(atom)
+                            }
+                        })
+                    });
+                    low
+                }
+                _ => todo!(),
             }
         }
     }
