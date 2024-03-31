@@ -1,16 +1,38 @@
 use std::{collections::HashMap, sync::Arc};
 
 use entity::{Layer, Molecule, Stack};
+use error::LMECoreError;
 use n_to_n::NtoN;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+pub mod error {
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    pub enum LMECoreError {
+        // IdMapUniqueError,
+        // NoSuchAtom,
+        // NoSuchId,
+        // RootLayerError,
+        // NotFillLayer,
+        PluginLayerError(isize, String),
+        NoSuchStack,
+        // WorkspaceNameConflict,
+        // WorkspaceNotFound,
+    }
+}
+
 pub mod entity {
     use std::{
         collections::{HashMap, HashSet},
+        io::Write,
+        path::PathBuf,
+        process::{Command, Stdio},
         sync::Arc,
     };
 
+    use lazy_static::lazy_static;
     use n_to_n::NtoN;
     use nalgebra::{Point3, Transform3};
     use pair::Pair;
@@ -18,6 +40,24 @@ pub mod entity {
         IndexedParallelIterator, IntoParallelIterator, ParallelBridge, ParallelIterator,
     };
     use serde::{Deserialize, Serialize};
+    use std::env;
+
+    use crate::error::LMECoreError;
+
+    fn get_plugin_directory() -> PathBuf {
+        let env_var = env::var("LME_PLUGIN_DIRECTORY");
+        if let Ok(env_var) = env_var {
+            PathBuf::from(env_var)
+        } else {
+            let mut current_plugin_dir = env::current_dir().unwrap();
+            current_plugin_dir.push("plugins");
+            current_plugin_dir
+        }
+    }
+
+    lazy_static! {
+        static ref PLUGIN_DIRECTORY: PathBuf = get_plugin_directory();
+    }
 
     #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, PartialOrd)]
     pub struct Atom {
@@ -95,22 +135,22 @@ pub mod entity {
         IgnoreBonds,
         ReplaceElement(usize, usize),
         RemoveElement(usize),
-        PluginFilter(String, Vec<String>)
+        PluginFilter(String, Vec<String>),
     }
 
     impl Layer {
-        pub fn filter(&self, mut low: Molecule) -> Molecule {
+        pub fn filter(&self, mut low: Molecule) -> Result<Molecule, LMECoreError> {
             match self {
-                Self::Fill(high) => Molecule::merge(low, high.clone()),
+                Self::Fill(high) => Ok(Molecule::merge(low, high.clone())),
                 Self::Transform(transform) => {
                     low.atoms.iter_mut().for_each(|(_, atom)| {
                         *atom = atom.map(|atom| atom.transform_position(transform))
                     });
-                    low
+                    Ok(low)
                 }
                 Self::IgnoreBonds => {
                     low.bonds = HashMap::new();
-                    low
+                    Ok(low)
                 }
                 Self::ReplaceElement(origin, target) => {
                     low.atoms.iter_mut().for_each(|(_, atom)| {
@@ -122,7 +162,7 @@ pub mod entity {
                             }
                         })
                     });
-                    low
+                    Ok(low)
                 }
                 Self::RemoveElement(element) => {
                     low.atoms.iter_mut().for_each(|(_, atom)| {
@@ -134,9 +174,36 @@ pub mod entity {
                             }
                         })
                     });
-                    low
+                    Ok(low)
                 }
-                _ => todo!(),
+                Self::PluginFilter(plugin, args) => {
+                    let mut command = PLUGIN_DIRECTORY.clone();
+                    command.push(plugin);
+                    let mut child = Command::new(command)
+                        .args(args)
+                        .stdin(Stdio::piped())
+                        .spawn()
+                        .map_err(|err| LMECoreError::PluginLayerError(-1, err.to_string()))?;
+                    let data_to_send = serde_json::to_string(&low)
+                        .map_err(|err| LMECoreError::PluginLayerError(-2, err.to_string()))?;
+                    if let Some(ref mut stdin) = child.stdin {
+                        stdin
+                            .write_all(&data_to_send.as_bytes())
+                            .map_err(|err| LMECoreError::PluginLayerError(-3, err.to_string()))?;
+                        let output = child
+                            .wait_with_output()
+                            .map_err(|err| LMECoreError::PluginLayerError(-4, err.to_string()))?;
+                        let data = String::from_utf8_lossy(&output.stdout);
+                        let high: Molecule = serde_json::from_str(&data)
+                            .map_err(|err| LMECoreError::PluginLayerError(-5, err.to_string()))?;
+                        Ok(Molecule::merge(low, high))
+                    } else {
+                        Err(LMECoreError::PluginLayerError(
+                            -6,
+                            "Unable to get stdin of child process".to_string(),
+                        ))
+                    }
+                }
             }
         }
     }
@@ -176,11 +243,11 @@ pub mod entity {
             }
         }
 
-        pub fn read(&self, mut container: Molecule) -> Molecule {
+        pub fn read(&self, mut container: Molecule) -> Result<Molecule, LMECoreError> {
             for layer in &self.0 {
-                container = layer.filter(container)
+                container = layer.filter(container)?
             }
-            container
+            Ok(container)
         }
     }
 }
@@ -211,10 +278,12 @@ impl Workspace {
         }
     }
 
-    pub fn read(&self, index: usize) -> Option<Molecule> {
+    pub fn read(&self, index: usize) -> Result<Molecule, LMECoreError> {
         self.stacks
             .get(index)
-            .map(|stack| stack.read(self.base.clone()))
+            .map_or(Err(LMECoreError::NoSuchStack), |stack| {
+                stack.read(self.base.clone())
+            })
     }
 
     pub fn stacks(&self) -> usize {
